@@ -5,7 +5,9 @@ This integration allows you to add cryptocurrency prices and wallet balances fro
 ## Installation
 
 Download from HACS or 
+
 Copy paste files to your HA folder: custom_components/binance/ or
+
 Add custom repo from HACS via https://github.com/cataseven/Binance.git
 
 Clean your browser cache, restart HA and...
