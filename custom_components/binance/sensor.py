@@ -42,12 +42,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 class BinanceFuturesPriceSensor(SensorEntity):
 
     def __init__(self, api_key, api_secret, symbol):
-        "Initialize the sensor."
         self._api_key = api_key
         self._api_secret = api_secret
         self._symbol = symbol
         self._state = None
         self._price_change_percent = None
+        self._unique_id = f"binance_{self._symbol}"
 
     @property
     def name(self):
@@ -87,6 +87,20 @@ class BinanceFuturesPriceSensor(SensorEntity):
             "price_change_percent": self._price_change_percent,
         }
 
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, "binance_device")},
+            "name": "Binance Account",
+            "manufacturer": "Binance",
+            "model": "Futures Prices",
+        }
+
     async def async_update(self):
         try:
             _LOGGER.debug(f"Fetching data for {self._symbol}...")
@@ -117,12 +131,12 @@ class BinanceFuturesPriceSensor(SensorEntity):
 class BinanceSpotPriceSensor(SensorEntity):
 
     def __init__(self, api_key, api_secret, symbol):
-        "Initialize the sensor."
         self._api_key = api_key
         self._api_secret = api_secret
         self._symbol = symbol
         self._state = None
         self._price_change_percent = None
+        self._unique_id = f"binance_{self._symbol}"
 
     @property
     def name(self):
@@ -188,14 +202,27 @@ class BinanceSpotPriceSensor(SensorEntity):
                 else:
                     raise Exception(f"Failed to fetch data for {symbol}, status: {response.status}")
 
-class BinanceWalletBalanceSensor(SensorEntity):
+    @property
+    def unique_id(self):
+        return self._unique_id
 
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, "binance_device")},
+            "name": "Binance Account",
+            "manufacturer": "Binance",
+            "model": "Spot Prices",
+        }
+
+class BinanceWalletBalanceSensor(SensorEntity):
     def __init__(self, api_key, api_secret):
-        "Initialize the sensor."
         self._api_key = api_key
         self._api_secret = api_secret
         self._state = None
         self._attributes = {}
+        self._unique_id = "binance_wallet_balance"
 
     @property
     def name(self):
@@ -216,6 +243,19 @@ class BinanceWalletBalanceSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         return self._attributes
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, "binance_device")},
+            "name": "Binance Account",
+            "manufacturer": "Binance",
+            "model": "Wallet Balances",
+        }
 
     async def async_update(self):
         try:
