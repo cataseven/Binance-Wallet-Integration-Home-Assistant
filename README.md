@@ -8,7 +8,7 @@ Download from HACS or
 
 Copy paste files to your HA folder: custom_components/binance/ or
 
-Add custom repo from HACS via https://github.com/cataseven/Binance.git
+Add custom repo from HACS via https://github.com/cataseven/Home-Assitant-Binance-Integration.git
 
 Clean your browser cache, restart HA and...
 
