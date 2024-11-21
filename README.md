@@ -4,7 +4,11 @@ This integration allows you to add cryptocurrency prices and wallet balances fro
 
 ## Installation
 
-Download from HACS or copy paste files to your HA folder: custom_components/binance/. Clean your browser cache, restart HA and...
+Download from HACS or 
+Copy paste files to your HA folder: custom_components/binance/ or
+Add custom repo from HACS via https://github.com/cataseven/Binance.git
+
+Clean your browser cache, restart HA and...
 
 1. Create an API key and API secret for your Binance account. <strong><span style="color: red;">IMPORTANT</span></strong> Please only use Read Only API. If you do not want to create sensor for your Wallet Balance do not check "Permits Universal Transfer" option. Use IP restriction for max safety! DO NOT SHARE YOUR API KEY and SECRET KEY with ANYONE!! It is your own choice to use this integration!
 ![2024-11-21 15_28_27-Greenshot image editor](https://github.com/user-attachments/assets/d1fb4449-024e-4342-b4e6-c8827f530182)
