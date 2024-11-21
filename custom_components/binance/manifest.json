@@ -1,7 +1,7 @@
 {
   "domain": "binance",
   "name": "Binance",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://www.home-assistant.io/integrations/binance",  
   "requirements": ["requests==2.32.3"],
   "codeowners": ["@cataseven"],
