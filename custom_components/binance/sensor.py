@@ -98,7 +98,7 @@ class BinanceFuturesPriceSensor(SensorEntity):
             "identifiers": {(DOMAIN, "binance_device")},
             "name": "Binance Account",
             "manufacturer": "Binance",
-            "model": "Futures Prices",
+            "model": "Sensors",
         }
 
     async def async_update(self):
@@ -213,7 +213,7 @@ class BinanceSpotPriceSensor(SensorEntity):
             "identifiers": {(DOMAIN, "binance_device")},
             "name": "Binance Account",
             "manufacturer": "Binance",
-            "model": "Spot Prices",
+            "model": "Sensors",
         }
 
 class BinanceWalletBalanceSensor(SensorEntity):
@@ -254,7 +254,7 @@ class BinanceWalletBalanceSensor(SensorEntity):
             "identifiers": {(DOMAIN, "binance_device")},
             "name": "Binance Account",
             "manufacturer": "Binance",
-            "model": "Wallet Balances",
+            "model": "Sensors",
         }
 
     async def async_update(self):
