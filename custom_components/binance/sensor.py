@@ -13,9 +13,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     api_key = config_entry.data[CONF_API_KEY]
     api_secret = config_entry.data[CONF_API_SECRET]
 
-    # Kullanıcıdan alınan coin çiftlerini data'dan alın
-    futures_pairs = config_entry.data.get(CONF_FUTURES_PAIRS, [])
-    spot_pairs = config_entry.data.get(CONF_SPOT_PAIRS, [])
+    # Kullanıcıdan alınan coin çiftlerini data ve options'dan al
+    futures_pairs = config_entry.data.get(CONF_FUTURES_PAIRS, []) + config_entry.options.get(CONF_FUTURES_PAIRS, [])
+    spot_pairs = config_entry.data.get(CONF_SPOT_PAIRS, []) + config_entry.options.get(CONF_SPOT_PAIRS, [])
 
     sensors = []
     # Futures sensörlerini oluştur
@@ -32,7 +32,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     async_add_entities(sensors, update_before_add=True)
 
     _LOGGER.debug(f"Created {len(sensors)} sensors for pairs: {futures_pairs + spot_pairs}")
-
 
 class BinanceFuturesPriceSensor(SensorEntity):
     "Representation of a Binance futures price sensor."
