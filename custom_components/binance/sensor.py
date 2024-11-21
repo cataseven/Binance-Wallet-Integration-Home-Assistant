@@ -40,7 +40,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     hass.loop.create_task(update_sensors())
 
 class BinanceFuturesPriceSensor(SensorEntity):
-    "Representation of a Binance futures price sensor."
 
     def __init__(self, api_key, api_secret, symbol):
         "Initialize the sensor."
@@ -52,17 +51,14 @@ class BinanceFuturesPriceSensor(SensorEntity):
 
     @property
     def name(self):
-        "Return the name of the sensor."
         return f"Binance Futures {self._symbol} Price"
 
     @property
     def native_value(self):
-        "Return the state of the sensor."
         return self._state
 
     @property
     def native_unit_of_measurement(self):
-        "Return the unit of measurement."
         if self._symbol.endswith("USDT"):
             return "USDT"
         elif self._symbol.endswith("DUSD"):
@@ -87,13 +83,11 @@ class BinanceFuturesPriceSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Return the state attributes of the sensor."""
         return {
             "price_change": self._price_change,
         }
 
     async def async_update(self):
-        "Fetch new state data for the sensor."
         try:
             _LOGGER.debug(f"Fetching data for {self._symbol}...")
             price_data = await self._fetch_binance_data(self._symbol)
@@ -106,7 +100,6 @@ class BinanceFuturesPriceSensor(SensorEntity):
             self._price_change = None
 
     async def _fetch_binance_data(self, symbol):
-        "Fetch the current price and change for the given symbol from Binance API."
         url = f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
         headers = {"X-MBX-APIKEY": self._api_key}
 
@@ -122,7 +115,6 @@ class BinanceFuturesPriceSensor(SensorEntity):
                     raise Exception(f"Failed to fetch data for {symbol}, status: {response.status}")
 
 class BinanceSpotPriceSensor(SensorEntity):
-    "Representation of a Binance spot price sensor."
 
     def __init__(self, api_key, api_secret, symbol):
         "Initialize the sensor."
@@ -134,17 +126,14 @@ class BinanceSpotPriceSensor(SensorEntity):
 
     @property
     def name(self):
-        "Return the name of the sensor."
         return f"Binance Spot {self._symbol} Price"
 
     @property
     def native_value(self):
-        "Return the state of the sensor."
         return self._state
 
     @property
     def native_unit_of_measurement(self):
-        "Return the unit of measurement."
         if self._symbol.endswith("USDT"):
             return "USDT"
         elif self._symbol.endswith("DUSD"):
@@ -164,18 +153,15 @@ class BinanceSpotPriceSensor(SensorEntity):
 
     @property
     def icon(self):
-        "Return the icon of the sensor."
         return "mdi:currency-usd"
 
     @property
     def extra_state_attributes(self):
-        """Return the state attributes of the sensor."""
         return {
             "price_change": self._price_change,
         }
 
     async def async_update(self):
-        "Fetch new state data for the sensor."
         try:
             _LOGGER.debug(f"Fetching data for {self._symbol}...")
             price_data = await self._fetch_binance_data(self._symbol)
@@ -188,7 +174,6 @@ class BinanceSpotPriceSensor(SensorEntity):
             self._price_change = None
 
     async def _fetch_binance_data(self, symbol):
-        "Fetch the current price and change for the given symbol from Binance API."
         url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
         headers = {"X-MBX-APIKEY": self._api_key}
 
@@ -204,7 +189,6 @@ class BinanceSpotPriceSensor(SensorEntity):
                     raise Exception(f"Failed to fetch data for {symbol}, status: {response.status}")
 
 class BinanceWalletBalanceSensor(SensorEntity):
-    "Representation of a Binance Wallet Balance sensor."
 
     def __init__(self, api_key, api_secret):
         "Initialize the sensor."
@@ -215,31 +199,25 @@ class BinanceWalletBalanceSensor(SensorEntity):
 
     @property
     def name(self):
-        "Return the name of the sensor."
         return "Binance Wallet Balance"
 
     @property
     def native_value(self):
-        "Return the state of the sensor."
         return sum(self._attributes.values()) if self._attributes else None
 
     @property
     def native_unit_of_measurement(self):
-        "Return the unit of measurement."
         return "USD"
 
     @property
     def icon(self):
-        "Return the icon of the sensor."
         return "mdi:currency-usd"
 
     @property
     def extra_state_attributes(self):
-        """Return the state attributes of the sensor."""
         return self._attributes
 
     async def async_update(self):
-        "Fetch new state data for the sensor."
         try:
             _LOGGER.debug(f"Fetching Wallet Balance...")
             balance_data = await self._fetch_binance_wallet_balance()
@@ -255,7 +233,6 @@ class BinanceWalletBalanceSensor(SensorEntity):
             self._attributes = {}
 
     async def _fetch_binance_wallet_balance(self):
-        "Fetch the Wallet Balance from Binance API."
         url = "https://api.binance.com/sapi/v1/asset/wallet/balance"
         timestamp = int(time.time() * 1000)
         headers = {"X-MBX-APIKEY": self._api_key}
