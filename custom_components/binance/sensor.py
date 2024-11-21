@@ -167,7 +167,29 @@ class BinanceSpotPriceSensor(SensorEntity):
 
     @property
     def icon(self):
-        return "mdi:currency-usd"
+        if self._symbol.endswith("USDT"):
+            return "mdi:currency-usd"
+        elif self._symbol.endswith("DUSD"):
+            return "mdi:currency-usd"
+        elif self._symbol.endswith("USDC"):
+            return "mdi:currency-usd"
+        elif self._symbol.endswith("TUSD"):
+            return "mdi:currency-usd"
+        elif self._symbol.endswith("DOGE"):
+            return "mdi:dog"
+        elif self._symbol.endswith("AEUR"):
+            return "mdi:currency-eur"
+        elif self._symbol.endswith("EURI"):
+            return "mdi:currency-eur"
+        elif self._symbol.endswith("ETH"):
+            return "mdi:ethereum"
+        elif self._symbol.endswith("TRY"):
+            return "mdi:currency-try"
+        elif self._symbol.endswith("BTC"):
+            return "mdi:bitcoin"
+        else:
+            return "mdi:cash"
+        
 
     @property
     def extra_state_attributes(self):
@@ -238,7 +260,7 @@ class BinanceWalletBalanceSensor(SensorEntity):
 
     @property
     def icon(self):
-        return "mdi:currency-usd"
+        return "mdi:wallet"
 
     @property
     def extra_state_attributes(self):
