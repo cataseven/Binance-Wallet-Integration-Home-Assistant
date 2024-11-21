@@ -6,15 +6,12 @@ from homeassistant.helpers import config_validation as cv
 from .const import DOMAIN, CONF_API_KEY, CONF_API_SECRET, CONF_PAIRS, CONF_SPOT_PAIRS, CONF_FUTURES_PAIRS
 
 class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    "Handle a config flow for Binance."
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        "Handle the initial step."
         errors = {}
         if user_input is not None:
             return self.async_create_entry(title="Binance", data=user_input)
-
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://fapi.binance.com/fapi/v2/ticker/price") as response:
@@ -23,14 +20,12 @@ class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 async with session.get("https://api.binance.com/api/v3/ticker/24hr") as response:
                     data = await response.json()
                     spot_symbols = sorted([item["symbol"] for item in data if float(item["weightedAvgPrice"]) > 0])
-
         except aiohttp.ClientError as err:
             errors["base"] = "cannot_connect"
             _LOGGER.error(f"Binance API'ye bağlanırken hata oluştu: {err}")
         except Exception as err:
             errors["base"] = "unknown"
             _LOGGER.exception(f"Beklenmeyen hata: {err}")
-
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -57,21 +52,17 @@ class BinanceOptionsFlowHandler(config_entries.OptionsFlow):
         self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
-        "Manage the options."
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
-
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://fapi.binance.com/fapi/v2/ticker/price") as response:
                     data = await response.json()
-                    # Sadece sembol bilgilerini al ve sırala
                     futures_symbols = sorted([item["symbol"] for item in data])
 
                 async with session.get("https://api.binance.com/api/v3/ticker/24hr") as response:
                     data = await response.json()
                     spot_symbols = sorted([item["symbol"] for item in data if float(item["weightedAvgPrice"]) > 0])
-
         except aiohttp.ClientError as err:
             _LOGGER.error(f"Binance API'ye bağlanırken hata oluştu: {err}")
             return self.async_abort(reason="cannot_connect")
