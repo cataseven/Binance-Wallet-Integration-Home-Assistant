@@ -13,20 +13,15 @@ class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         "Handle the initial step."
         errors = {}
         if user_input is not None:
-            # API anahtarlarını doğrulama ve kullanıcı girişi işlemi yapılabilir
             return self.async_create_entry(title="Binance", data=user_input)
 
         try:
-            # Binance API'den coin çiftlerini al
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://fapi.binance.com/fapi/v2/ticker/price") as response:
                     data = await response.json()
-                    # Sadece sembol bilgilerini al ve sırala
                     futures_symbols = sorted([item["symbol"] for item in data])
-
                 async with session.get("https://api.binance.com/api/v3/ticker/24hr") as response:
                     data = await response.json()
-                    # Sadece sembol bilgilerini al ve sırala
                     spot_symbols = sorted([item["symbol"] for item in data if float(item["weightedAvgPrice"]) > 0])
 
         except aiohttp.ClientError as err:
@@ -36,7 +31,6 @@ class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "unknown"
             _LOGGER.exception(f"Beklenmeyen hata: {err}")
 
-        # Kullanıcıdan API bilgilerini ve coin çiftlerini isteyen form
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -68,7 +62,6 @@ class BinanceOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         try:
-            # Binance API'den coin çiftlerini al
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://fapi.binance.com/fapi/v2/ticker/price") as response:
                     data = await response.json()
@@ -77,7 +70,6 @@ class BinanceOptionsFlowHandler(config_entries.OptionsFlow):
 
                 async with session.get("https://api.binance.com/api/v3/ticker/24hr") as response:
                     data = await response.json()
-                    # Sadece sembol bilgilerini al ve sırala
                     spot_symbols = sorted([item["symbol"] for item in data if float(item["weightedAvgPrice"]) > 0])
 
         except aiohttp.ClientError as err:
@@ -87,7 +79,6 @@ class BinanceOptionsFlowHandler(config_entries.OptionsFlow):
             _LOGGER.exception(f"Beklenmeyen hata: {err}")
             return self.async_abort(reason="unknown")
 
-        # Kullanıcıya mevcut ayarları göster
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
