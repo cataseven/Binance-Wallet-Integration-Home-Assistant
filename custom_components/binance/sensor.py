@@ -47,7 +47,7 @@ class BinanceFuturesPriceSensor(SensorEntity):
         self._api_secret = api_secret
         self._symbol = symbol
         self._state = None
-        self._price_change = None
+        self._price_change_percent = None
 
     @property
     def name(self):
@@ -84,7 +84,7 @@ class BinanceFuturesPriceSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         return {
-            "price_change": self._price_change,
+            "price_change_percent": self._price_change_percent,
         }
 
     async def async_update(self):
@@ -92,12 +92,12 @@ class BinanceFuturesPriceSensor(SensorEntity):
             _LOGGER.debug(f"Fetching data for {self._symbol}...")
             price_data = await self._fetch_binance_data(self._symbol)
             self._state = price_data.get("price")
-            self._price_change = price_data.get("priceChangePercent")
-            _LOGGER.debug(f"Fetched data for {self._symbol}: price={self._state}, change={self._price_change}")
+            self._price_change_percent = price_data.get("priceChangePercent")
+            _LOGGER.debug(f"Fetched data for {self._symbol}: price={self._state}, change={self._price_change_percent}")
         except Exception as e:
             _LOGGER.error(f"Error fetching data for {self._symbol}: {e}")
             self._state = None
-            self._price_change = None
+            self._price_change_percent = None
 
     async def _fetch_binance_data(self, symbol):
         url = f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
@@ -122,7 +122,7 @@ class BinanceSpotPriceSensor(SensorEntity):
         self._api_secret = api_secret
         self._symbol = symbol
         self._state = None
-        self._price_change = None
+        self._price_change_percent = None
 
     @property
     def name(self):
@@ -158,7 +158,7 @@ class BinanceSpotPriceSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         return {
-            "price_change": self._price_change,
+            "price_change_percent": self._price_change_percent,
         }
 
     async def async_update(self):
@@ -166,12 +166,12 @@ class BinanceSpotPriceSensor(SensorEntity):
             _LOGGER.debug(f"Fetching data for {self._symbol}...")
             price_data = await self._fetch_binance_data(self._symbol)
             self._state = price_data.get("price")
-            self._price_change = price_data.get("priceChangePercent")
-            _LOGGER.debug(f"Fetched data for {self._symbol}: price={self._state}, change={self._price_change}")
+            self._price_change_percent = price_data.get("priceChangePercent")
+            _LOGGER.debug(f"Fetched data for {self._symbol}: price={self._state}, change={self._price_change_percent}")
         except Exception as e:
             _LOGGER.error(f"Error fetching data for {self._symbol}: {e}")
             self._state = None
-            self._price_change = None
+            self._price_change_percent = None
 
     async def _fetch_binance_data(self, symbol):
         url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
