@@ -2,7 +2,7 @@
   "name": "Binance",
   "description": "Binance Wallet Balance and Price Tracker",
   "category": "integration",
-  "homeassistant": "2024.11.2",
+  "homeassistant": "2023.11.2",
   "country": "TR",
   "render_readme": true
 }
