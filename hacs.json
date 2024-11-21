@@ -4,6 +4,6 @@
   "category": "integration",
   "homeassistant": "2023.11.2",
   "country": "TR",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "render_readme": true
 }
