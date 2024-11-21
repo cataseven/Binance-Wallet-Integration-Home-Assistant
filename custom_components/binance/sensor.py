@@ -5,6 +5,7 @@ import aiohttp
 import hashlib
 import hmac
 import time
+import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -13,25 +14,30 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     api_key = config_entry.data[CONF_API_KEY]
     api_secret = config_entry.data[CONF_API_SECRET]
 
-    # Kullanıcıdan alınan coin çiftlerini data ve options'dan al
     futures_pairs = config_entry.data.get(CONF_FUTURES_PAIRS, []) + config_entry.options.get(CONF_FUTURES_PAIRS, [])
     spot_pairs = config_entry.data.get(CONF_SPOT_PAIRS, []) + config_entry.options.get(CONF_SPOT_PAIRS, [])
 
     sensors = []
-    # Futures sensörlerini oluştur
+    
     for pair in futures_pairs:
         sensors.append(BinanceFuturesPriceSensor(api_key, api_secret, pair))
 
-    # Spot sensörlerini oluştur
     for pair in spot_pairs:
         sensors.append(BinanceSpotPriceSensor(api_key, api_secret, pair))
 
-    # BinanceWalletBalanceSensor'ü ekle
     sensors.append(BinanceWalletBalanceSensor(api_key, api_secret))
 
     async_add_entities(sensors, update_before_add=True)
 
     _LOGGER.debug(f"Created {len(sensors)} sensors for pairs: {futures_pairs + spot_pairs}")
+
+    async def update_sensors():
+        while True:
+            for sensor in sensors:
+                await sensor.async_update()
+            await asyncio.sleep(30)
+
+    hass.loop.create_task(update_sensors())
 
 class BinanceFuturesPriceSensor(SensorEntity):
     "Representation of a Binance futures price sensor."
@@ -215,7 +221,6 @@ class BinanceWalletBalanceSensor(SensorEntity):
     @property
     def native_value(self):
         "Return the state of the sensor."
-        # Toplam bakiyeyi döndür (isteğe bağlı)
         return sum(self._attributes.values()) if self._attributes else None
 
     @property
@@ -255,7 +260,6 @@ class BinanceWalletBalanceSensor(SensorEntity):
         timestamp = int(time.time() * 1000)
         headers = {"X-MBX-APIKEY": self._api_key}
 
-        # Binance API imzasını oluştur
         query_string = f"timestamp={timestamp}"
         signature = hmac.new(self._api_secret.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
 
