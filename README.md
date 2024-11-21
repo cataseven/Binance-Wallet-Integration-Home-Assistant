@@ -4,7 +4,7 @@ This integration allows you to add cryptocurrency prices and wallet balances fro
 
 ## Installation
 
-1. Create an API key and API secret for your Binance account. <span style="color:red;"> **IMPORTANT** </span> Please only use Read Only API. If you do not want to create sensor for your Wallet Balance do not check "Permits Universal Transfer" option. Use IP restriction for max safety!
+1. Create an API key and API secret for your Binance account. <strong><span style="color: red;">IMPORTANT</span></strong> Please only use Read Only API. If you do not want to create sensor for your Wallet Balance do not check "Permits Universal Transfer" option. Use IP restriction for max safety! 
 2. ![2024-11-21 15_28_27-Greenshot image editor](https://github.com/user-attachments/assets/d1fb4449-024e-4342-b4e6-c8827f530182)
 
 3. In Home Assistant, go to **Settings** > **Integrations** > **Add Integration**.
