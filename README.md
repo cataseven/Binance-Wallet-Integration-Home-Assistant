@@ -42,4 +42,4 @@ If you want to contribute to this integration, please visit the GitHub repositor
 
 ## License
 
-This integration is licensed under the MIT License.
+This integration is licensed under the GNU GENERAL PUBLIC LICENSE v3
