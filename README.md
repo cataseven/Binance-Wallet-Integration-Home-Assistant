@@ -24,7 +24,7 @@ Clean your browser cache, restart HA and...
 
 This integration creates the following sensors:
 
-* **Binance Wallet Balance:** A sensor that shows the balances in your Binance wallets. Please see attributes of sensor. You can see your total and seperate wallets."
+* **Binance Wallet Balance:** A sensor that shows the balances in your Binance wallets. Please see attributes of sensor. You can see your total balances as state and market based wallets as attributes.
 ![2024-11-22 10_27_06-Greenshot image editor](https://github.com/user-attachments/assets/36535afc-f4ca-4eaf-b59c-ac294ee3d625)
 
 * **Binance Futures {symbol} Price:** A price sensor for each selected futures pair. Please see attributes of sensor: "Price" and "Price Change % 24h"
