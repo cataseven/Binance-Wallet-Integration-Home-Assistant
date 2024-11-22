@@ -36,6 +36,10 @@ This integration creates the following sensors:
 ## Supported Coin Pairs
 
 This integration supports all coin pairs that are supported by Binance Spot and COIN Futures Markets.
+![2024-11-22 10_33_37-Settings – Home Assistant](https://github.com/user-attachments/assets/00c6fe96-9293-4b88-bdd0-ec967f81c60b)
+
+![2024-11-22 10_33_50-Settings – Home Assistant](https://github.com/user-attachments/assets/7f8d535c-d458-4424-a0da-34df34fc0868)
+
 
 ## Troubleshooting
 
