@@ -1,4 +1,4 @@
-# Binance Integration for Home Assistant
+# Binance Wallet and Price Integration for Home Assistant
 
 This integration allows you to add cryptocurrency prices and wallet balances from your Binance account to Home Assistant.
 
@@ -24,9 +24,12 @@ Clean your browser cache, restart HA and...
 
 This integration creates the following sensors:
 
-* **Binance Futures {symbol} Price:** A price sensor for each selected futures pair. Please see attributes of sensor
-* **Binance Spot {symbol} Price:** A price sensor for each selected spot pair. Please see attributes of sensor
-* **Binance Wallet Balance:** A sensor that shows the total balance in your Binance wallet. Please see attributes of sensor
+* **Binance Wallet Balance:** A sensor that shows the balances in your Binance wallets. Please see attributes of sensor. You can see your total and seperate wallets."
+![2024-11-22 10_27_06-Greenshot image editor](https://github.com/user-attachments/assets/36535afc-f4ca-4eaf-b59c-ac294ee3d625)
+
+* **Binance Futures {symbol} Price:** A price sensor for each selected futures pair. Please see attributes of sensor: "Price" and "Price Change % 24h"
+* **Binance Spot {symbol} Price:** A price sensor for each selected spot pair. Please see attributes of sensor: "Price" and "Price Change % 24h"
+
 
 ## Supported Coin Pairs
 
