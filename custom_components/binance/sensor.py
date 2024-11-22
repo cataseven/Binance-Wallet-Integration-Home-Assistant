@@ -60,19 +60,23 @@ class BinanceFuturesPriceSensor(SensorEntity):
     @property
     def native_unit_of_measurement(self):
         if self._symbol.endswith("USDT"):
-            return "USDT"
+            return "$"
         elif self._symbol.endswith("DUSD"):
-            return "FDUSD"
+            return "$"
         elif self._symbol.endswith("USDC"):
-            return "USDC"
+            return "$"
         elif self._symbol.endswith("TUSD"):
-            return "TUSD"
+            return "$"
         elif self._symbol.endswith("DOGE"):
             return "DOGE"
         elif self._symbol.endswith("AEUR"):
-            return "AEUR"
+            return "€"
         elif self._symbol.endswith("EURI"):
-            return "EURI"
+            return "€"
+        elif self._symbol.endswith("TRY"):
+            return "₺"
+        elif self._symbol.endswith("BTC"):
+            return "₿"
         else:
             return self._symbol[-3:]
 
@@ -149,19 +153,23 @@ class BinanceSpotPriceSensor(SensorEntity):
     @property
     def native_unit_of_measurement(self):
         if self._symbol.endswith("USDT"):
-            return "USDT"
+            return "$"
         elif self._symbol.endswith("DUSD"):
-            return "FDUSD"
+            return "$"
         elif self._symbol.endswith("USDC"):
-            return "USDC"
+            return "$"
         elif self._symbol.endswith("TUSD"):
-            return "TUSD"
+            return "$"
         elif self._symbol.endswith("DOGE"):
             return "DOGE"
         elif self._symbol.endswith("AEUR"):
-            return "AEUR"
+            return "€"
         elif self._symbol.endswith("EURI"):
-            return "EURI"
+            return "€"
+        elif self._symbol.endswith("TRY"):
+            return "₺"
+        elif self._symbol.endswith("BTC"):
+            return "₿"
         else:
             return self._symbol[-3:]
 
@@ -256,7 +264,7 @@ class BinanceWalletBalanceSensor(SensorEntity):
 
     @property
     def native_unit_of_measurement(self):
-        return "USD"
+        return "$"
 
     @property
     def icon(self):
