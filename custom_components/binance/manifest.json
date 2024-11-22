@@ -1,8 +1,8 @@
 {
   "domain": "binance",
   "name": "Binance",
-  "documentation": "https://github.com/cataseven/Home-Assitant-Binance-Integration",
-  "issue_tracker": "https://github.com/cataseven/Home-Assitant-Binance-Integration/issues", 
+  "documentation": "https://github.com/cataseven/Home-Assistant-Binance-Integration",
+  "issue_tracker": "https://github.com/cataseven/Home-Assistant-Binance-Integration/issues", 
   "codeowners": ["@cataseven"],
   "config_flow": true,
   "dependencies": [],
