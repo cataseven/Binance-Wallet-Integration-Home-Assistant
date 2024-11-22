@@ -1,6 +1,6 @@
-# Binance Wallet and Price Integration for Home Assistant
+# Binance Wallet Balances and Price Tracking Integration for Home Assistant
 
-This integration allows you to add cryptocurrency prices and wallet balances from your Binance account to Home Assistant.
+This integration allows you to add cryptocurrency prices and your wallet balances from your Binance account to Home Assistant.
 
 ## Installation
 
