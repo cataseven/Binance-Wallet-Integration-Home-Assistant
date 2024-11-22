@@ -29,6 +29,8 @@ This integration creates the following sensors:
 
 * **Binance Futures {symbol} Price:** A price sensor for each selected futures pair. Please see attributes of sensor: "Price" and "Price Change % 24h"
 * **Binance Spot {symbol} Price:** A price sensor for each selected spot pair. Please see attributes of sensor: "Price" and "Price Change % 24h"
+  ![2024-11-22 10_32_14-Developer Tools – Home Assistant](https://github.com/user-attachments/assets/cde7d0b5-6cc5-40d6-8125-a1b573694b51)
+
 
 
 ## Supported Coin Pairs
