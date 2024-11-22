@@ -43,7 +43,7 @@ This integration supports all coin pairs that are supported by Binance Spot and 
 
 ## Troubleshooting
 
-If you encounter any issues, please ask for help on the Home Assistant community forums or Discord server.
+If you encounter any issues, please feel free to ask for help.
 
 ## Contributing
 
