@@ -3,7 +3,6 @@
   "description": "Binance Wallet Balance and Price Tracker",
   "category": "integration",
   "homeassistant": "2023.11.2",
-  "country": "TR",
   "version": "1.0.10",
   "render_readme": true
 }
