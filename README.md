@@ -1,54 +1,48 @@
-# Binance Wallet Balances and Price Tracking Integration for Home Assistant
+# Home Assistant Binance Integration
 
-This integration allows you to add cryptocurrency prices and your wallet balances from your Binance account to Home Assistant.
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+
+This integration for Home Assistant allows you to track YOUR WALLET BALANCES from your Binance account and prices of spot and futures pairs real-time.
+
+<!-- ![Integration Screenshot](https://.../screenshot.png) -->
+<!-- Add a screenshot of the integration in the UI here -->
+
+## Features
+
+* Displays balances of all your wallets (Spot, Funding, Futures etc.) as separate sensors in both BTC and USDT.
+* Real-time price tracking for selected Spot and Futures pairs.
+* Detailed data for each pair, including price, daily change percentage, and 24-hour high/low.
+* Easy installation and updates via HACS.
+* Full configuration support through the Home Assistant UI.
 
 ## Installation
 
-Download from HACS or 
+**Prerequisite:** You must have [HACS](https://hacs.xyz/) installed on your Home Assistant system before installing this integration.
 
-Copy paste files to your HA folder: custom_components/binance/ or
+1.  Navigate to HACS > Integrations.
+2.  Click the "Explore & Download Repositories" button in the bottom right corner.
+3.  Search for "Binance" and click on the result.
+4.  Click the "Download" button to install.
+5.  Restart Home Assistant.
 
-Add custom repo from HACS via https://github.com/cataseven/Home-Assitant-Binance-Integration.git
+## Configuration
 
-Clean your browser cache, restart HA and...
+1.  Navigate to **Settings** > **Devices & Services**.
+2.  Click the **"Add Integration"** button in the bottom right.
+3.  Search for and select **"Binance"** from the list.
+4. Create an API key and API secret for your Binance account on Binance website.
+   - IMPORTANT!!! Please only use Enable Reading (Read Only) API.
+   - If you do not want to create sensor for your Wallet Balance do not check "Permits Universal Transfer" option.
+   - If you want to use Wallet Balances sensor check "Permits Universal Transfer" option.
+   - If you have static IP Use IP restriction for max safety!
+   - DO NOT SHARE YOUR API KEY and SECRET KEY with ANYONE!!
+   - It is your own responsibility to manage your api credentials!
+6. Input your API Key and Secret Key to configuration page.
+7.  Select the Spot and Futures pairs you want to track.
+8.  Click "Submit".
 
-1. Create an API key and API secret for your Binance account. <strong><span style="color: red;">IMPORTANT</span></strong> Please only use Read Only API. If you do not want to create sensor for your Wallet Balance do not check "Permits Universal Transfer" option. Use IP restriction for max safety! DO NOT SHARE YOUR API KEY and SECRET KEY with ANYONE!! It is your own responsibility to manage your api credentials!
-![2024-11-21 15_28_27-Greenshot image editor](https://github.com/user-attachments/assets/d1fb4449-024e-4342-b4e6-c8827f530182)
-2. In Home Assistant, go to **Settings** > **Integrations** > **Add Integration**.
-3. Search for and select **Binance**.
-4. Enter your API key and API secret.
-5. Select the coin pairs you want to track.
-6. Click **Submit**.
+The integration is now set up! Your sensors will be available.
 
-## Sensors
+## Support
 
-This integration creates the following sensors:
-
-* **Binance Wallet Balance:** A sensor that shows the balances in your Binance wallets. Please see attributes of sensor. You can see your total balances as state and market based wallets as attributes.
-![2024-11-22 10_27_06-Greenshot image editor](https://github.com/user-attachments/assets/36535afc-f4ca-4eaf-b59c-ac294ee3d625)
-
-* **Binance Futures {symbol} Price:** A price sensor for each selected futures pair. Please see attributes of sensor: "Price" and "Price Change % 24h"
-* **Binance Spot {symbol} Price:** A price sensor for each selected spot pair. Please see attributes of sensor: "Price" and "Price Change % 24h"
-  ![2024-11-22 10_32_14-Developer Tools – Home Assistant](https://github.com/user-attachments/assets/cde7d0b5-6cc5-40d6-8125-a1b573694b51)
-
-
-
-## Supported Coin Pairs
-
-This integration supports all coin pairs that are supported by Binance Spot and COIN Futures Markets.
-![2024-11-22 10_33_37-Settings – Home Assistant](https://github.com/user-attachments/assets/00c6fe96-9293-4b88-bdd0-ec967f81c60b)
-
-![2024-11-22 10_33_50-Settings – Home Assistant](https://github.com/user-attachments/assets/7f8d535c-d458-4424-a0da-34df34fc0868)
-
-
-## Troubleshooting
-
-If you encounter any issues, please feel free to ask for help.
-
-## Contributing
-
-If you want to contribute to this integration, please visit the GitHub repository.
-
-## License
-
-This integration is licensed under the GNU GENERAL PUBLIC LICENSE v3
+If you encounter any issues or have a suggestion for improvement, please open an issue on the [GitHub Issues](https://github.com/cataseven/Home-Assistant-Binance-Integration/issues) page.
