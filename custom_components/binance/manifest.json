@@ -1,0 +1,12 @@
+{
+  "domain": "binance",
+  "name": "Binance",
+  "documentation": "https://github.com/cataseven/Home-Assistant-Binance-Integration",
+  "issue_tracker": "https://github.com/cataseven/Home-Assistant-Binance-Integration/issues",
+  "codeowners": ["@cataseven"],
+  "config_flow": true,
+  "dependencies": [],
+  "requirements": [],
+  "version": "1.1.0",
+  "iot_class": "cloud_polling"
+}
