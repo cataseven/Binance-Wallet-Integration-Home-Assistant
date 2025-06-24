@@ -1,4 +1,3 @@
-"""Config flow for Binance integration."""
 import logging
 import voluptuous as vol
 import aiohttp
@@ -23,15 +22,12 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def _get_binance_symbols():
-    """Fetch available spot and futures symbols from Binance."""
     async with aiohttp.ClientSession() as session:
-        # Fetch Futures symbols
         async with session.get(f"{FUTURES_API_URL}/fapi/v2/ticker/price") as response:
             response.raise_for_status()
             data = await response.json()
             futures_symbols = sorted([item["symbol"] for item in data])
 
-        # Fetch Spot symbols
         async with session.get(f"{SPOT_API_URL}/api/v3/ticker/24hr") as response:
             response.raise_for_status()
             data = await response.json()
@@ -47,16 +43,12 @@ async def _get_binance_symbols():
 
 
 class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Binance."""
 
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step."""
         errors = {}
         if user_input is not None:
-            # Here you would typically validate the API keys, but for this integration
-            # we will assume they are correct and proceed.
             return self.async_create_entry(title="Binance", data=user_input)
 
         try:
@@ -87,19 +79,15 @@ class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        """Get the options flow for this handler."""
         return BinanceOptionsFlowHandler(config_entry)
 
 
 class BinanceOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle Binance options."""
 
     def __init__(self, config_entry):
-        """Initialize options flow."""
         self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
-        """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
