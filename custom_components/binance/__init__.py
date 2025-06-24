@@ -1,4 +1,3 @@
-"""The Binance integration."""
 import asyncio
 import logging
 import time
@@ -31,13 +30,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update."""
     _LOGGER.info("Binance configuration options updated, reloading integration.")
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Binance from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
     coordinator = BinanceDataUpdateCoordinator(
@@ -59,15 +56,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 class BinanceDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching Binance data."""
 
     def __init__(self, hass, api_key, api_secret, update_interval):
-        """Initialize."""
         self.api_key = api_key
         self.api_secret = api_secret
         self.session = aiohttp.ClientSession()
@@ -80,7 +74,6 @@ class BinanceDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_get_btcusdt_price(self):
-        """Fetch the current BTC/USDT price."""
         url = f"{SPOT_API_URL}/api/v3/ticker/price?symbol=BTCUSDT"
         async with self.session.get(url) as response:
             response.raise_for_status()
@@ -88,7 +81,6 @@ class BinanceDataUpdateCoordinator(DataUpdateCoordinator):
             return float(data['price'])
 
     async def _async_update_data(self):
-        """Fetch data from API endpoint and process it."""
         try:
             async with asyncio.timeout(30):
                 futures_res, spot_res, wallet_res, btcusdt_price = await asyncio.gather(
@@ -111,27 +103,24 @@ class BinanceDataUpdateCoordinator(DataUpdateCoordinator):
                 }
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as err:
             raise UpdateFailed("Timeout while connecting to API") from err
         except Exception as err:
             raise UpdateFailed(f"An unexpected error occurred: {err}") from err
 
     async def _async_get_futures_data(self):
-        """Fetch all futures tickers."""
         url = f"{FUTURES_API_URL}/fapi/v1/ticker/24hr"
         async with self.session.get(url) as response:
             response.raise_for_status()
             return await response.json()
 
     async def _async_get_spot_data(self):
-        """Fetch all spot tickers."""
         url = f"{SPOT_API_URL}/api/v3/ticker/24hr"
         async with self.session.get(url) as response:
             response.raise_for_status()
             return await response.json()
 
     async def _async_get_wallet_balance(self):
-        """Fetch wallet balance."""
         url = f"{SPOT_API_URL}/sapi/v1/asset/wallet/balance"
         timestamp = int(time.time() * 1000)
         headers = {"X-MBX-APIKEY": self.api_key}
