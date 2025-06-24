@@ -30,7 +30,7 @@ This integration for Home Assistant allows you to track YOUR WALLET BALANCES fro
 1.  Navigate to **Settings** > **Devices & Services**.
 2.  Click the **"Add Integration"** button in the bottom right.
 3.  Search for and select **"Binance"** from the list.
-4. Create an API key and API secret for your Binance account on Binance website.
+4. Create an API key and API secret for your Binance account on Binance website. https://www.binance.com/en/my/settings/api-management
    - IMPORTANT!!! Please only use Enable Reading (Read Only) API.
    - If you do not want to create sensor for your Wallet Balance do not check "Permits Universal Transfer" option.
    - If you want to use Wallet Balances sensor check "Permits Universal Transfer" option.
