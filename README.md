@@ -4,9 +4,6 @@
 
 This integration for Home Assistant allows you to track YOUR WALLET BALANCES from your Binance account and prices of spot and futures pairs real-time.
 
-<!-- ![Integration Screenshot](https://.../screenshot.png) -->
-<!-- Add a screenshot of the integration in the UI here -->
-
 ## Features
 
 * Displays balances of all your wallets (Spot, Funding, Futures etc.) as separate sensors in both BTC and USDT.
