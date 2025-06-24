@@ -37,8 +37,6 @@ This integration for Home Assistant allows you to track YOUR WALLET BALANCES fro
    - If you have static IP Use IP restriction for max safety!
    - DO NOT SHARE YOUR API KEY and SECRET KEY with ANYONE!!
    - It is your own responsibility to manage your api credentials!
-     
-![image1](images/Api1.png)
 
 6. Input your API Key and Secret Key to configuration page.
 7.  Select the Spot and Futures pairs you want to track.
