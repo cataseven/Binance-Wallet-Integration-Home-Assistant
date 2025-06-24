@@ -44,8 +44,12 @@ The integration is now set up! Your sensors will be available.
 If you want to remove any entity, just go to list and uncheck the pair
 
 ![image1](images/key.png)
+
 ![image2](images/form1.png)
-![image2](images/form2.png)
+
+![image3](images/form2.png)
+
+![image4](images/form3.png)
 
 ## Support
 
