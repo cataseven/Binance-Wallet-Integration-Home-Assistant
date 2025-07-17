@@ -54,3 +54,6 @@ If you want to remove any entity, just go to list and uncheck the pair
 ## Support
 
 If you encounter any issues or have a suggestion for improvement, please open an issue on the [GitHub Issues](https://github.com/cataseven/Home-Assistant-Binance-Integration/issues) page.
+
+## ⭐ Support
+If you like this card, feel free to ⭐ star the project on GitHub and share it with the Home Assistant community!
