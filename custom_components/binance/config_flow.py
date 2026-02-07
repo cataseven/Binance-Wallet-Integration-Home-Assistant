@@ -10,6 +10,7 @@ from .const import (
     DOMAIN,
     CONF_API_KEY,
     CONF_API_SECRET,
+    CONF_ACCOUNT_NAME,
     CONF_FUTURES_PAIRS,
     CONF_SPOT_PAIRS,
     CONF_UPDATE_INTERVAL,
@@ -49,7 +50,13 @@ class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         errors = {}
         if user_input is not None:
-            return self.async_create_entry(title="Binance", data=user_input)
+            return self.async_create_entry(
+                title=f"Binance ({user_input[CONF_ACCOUNT_NAME]})",
+                data=user_input,
+            )
+
+        futures_symbols = []
+        spot_symbols = []
 
         try:
             futures_symbols, spot_symbols = await _get_binance_symbols()
@@ -63,6 +70,7 @@ class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_ACCOUNT_NAME): str,
                     vol.Required(CONF_API_KEY): str,
                     vol.Required(CONF_API_SECRET): str,
                     vol.Optional(CONF_FUTURES_PAIRS, default=[]): cv.multi_select(

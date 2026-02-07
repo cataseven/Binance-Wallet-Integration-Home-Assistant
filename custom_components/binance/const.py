@@ -6,6 +6,7 @@ PLATFORMS = ["sensor"]
 # --- Configuration Constants ---
 CONF_API_KEY = "api_key"
 CONF_API_SECRET = "api_secret"
+CONF_ACCOUNT_NAME = "account_name"
 CONF_FUTURES_PAIRS = "futures_pairs"
 CONF_SPOT_PAIRS = "spot_pairs"
 CONF_UPDATE_INTERVAL = "update_interval"
