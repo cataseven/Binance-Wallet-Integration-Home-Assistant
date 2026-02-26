@@ -1,70 +1,72 @@
-"""Support for Binance sensors."""
+"""Binance sensor entities."""
+
 import logging
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.core import callback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    DOMAIN,
+    BTCUSDT_PRICE,
     CONF_ACCOUNT_NAME,
     CONF_FUTURES_PAIRS,
     CONF_SPOT_PAIRS,
+    DOMAIN,
+    FIAT_UNITS,
     FUTURES_DATA,
+    PNL_DATA,
+    QUOTE_ASSET_CONFIG,
+    QUOTE_ASSET_KEYS_SORTED,
+    SHARED_KEY,
     SPOT_DATA,
     WALLET_DATA,
-    BTCUSDT_PRICE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# --- Mappings for Units and Icons based on user request ---
-UNIT_MAP = {
-    "USDT": "USD", "DUSD": "USD", "USDC": "USD", "TUSD": "USD", "BUSD": "USD", "DAI": "USD",
-    "AEUR": "EUR", "EURI": "EUR",
-    "TRY": "TRY",
-    "BTC": "BTC",
-    "DOGE": "DOGE",
-    "ETH": "ETH",
-    "BNB": "BNB",
-    "BRL": "BRL",
-    "UAH": "UAH",
-    "ZAR": "ZAR",
-    "PLN": "PLN",
-    "RON": "RON",
-    "ARS": "ARS",
-    "JPY": "JPY",
-    "MXN": "MXN",
-    "COP": "COP",
-    "CZK": "CZK",
-}
 
-ICON_MAP = {
-    "USDT": "mdi:currency-usd", "DUSD": "mdi:currency-usd", "USDC": "mdi:currency-usd", "TUSD": "mdi:currency-usd", "BUSD": "mdi:currency-usd", "DAI": "mdi:currency-usd",
-    "AEUR": "mdi:currency-eur", "EURI": "mdi:currency-eur",
-    "TRY": "mdi:currency-try",
-    "BTC": "mdi:bitcoin",
-    "ETH": "mdi:ethereum",
-    "DOGE": "mdi:dog",
-    "BRL": "mdi:currency-brl",
-    "UAH": "mdi:currency-uah",
-    "PLN": "mdi:cash",
-    "JPY": "mdi:currency-jpy",
-    "MXN": "mdi:cash",
-    "ZAR": "mdi:cash",
-    "RON": "mdi:cash",
-    "ARS": "mdi:cash",
-    "COP": "mdi:cash",
-    "CZK": "mdi:cash",
-}
+def _resolve_quote_asset(symbol: str) -> str | None:
+    """Return the quote asset suffix for *symbol*, or None if unknown."""
+    for asset in QUOTE_ASSET_KEYS_SORTED:
+        if symbol.endswith(asset) and len(symbol) > len(asset):
+            return asset
+    return None
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    """Set up Binance sensors based on a config entry."""
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]
+def _all_desired_price_uids(hass: HomeAssistant) -> set[str]:
+    """Collect desired price sensor unique IDs across ALL config entries."""
+    uids: set[str] = set()
+    shared = hass.data.get(DOMAIN, {}).get(SHARED_KEY)
+    if not shared:
+        return uids
+    for pairs in shared["pair_registry"].values():
+        for pair in pairs.get("futures", []):
+            uids.add(f"binance_futures_{pair}")
+        for pair in pairs.get("spot", []):
+            uids.add(f"binance_spot_{pair}")
+    return uids
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Binance sensors from a config entry."""
+    entry_data = hass.data[DOMAIN][config_entry.entry_id]
+    account_coordinator = entry_data["account_coordinator"]
+
+    shared = hass.data[DOMAIN][SHARED_KEY]
+    price_coordinator = shared["price_coordinator"]
+
     entity_registry = async_get_entity_registry(hass)
-
     account_name = config_entry.data.get(CONF_ACCOUNT_NAME, "Account")
     entry_id = config_entry.entry_id
 
@@ -75,131 +77,142 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         CONF_SPOT_PAIRS, config_entry.data.get(CONF_SPOT_PAIRS, [])
     )
 
-    # --- Build desired unique_ids for stale entity cleanup ---
-    desired_unique_ids = set()
+    # --- Build desired unique IDs for THIS entry's own entities ---
+    desired_own_uids: set[str] = set()
 
-    # Price sensors use a global unique_id (shared across entries)
+    fmt_account = account_name.lower().replace(" ", "_")
+    wallet_data = (account_coordinator.data or {}).get(WALLET_DATA, {})
+    for wallet_name in wallet_data:
+        fmt_name = wallet_name.lower().replace(" ", "_")
+        desired_own_uids.add(f"binance_wallet_{fmt_account}_{fmt_name}_btc")
+        desired_own_uids.add(f"binance_wallet_{fmt_account}_{fmt_name}_usdt")
+    desired_own_uids.add(f"binance_pnl_{fmt_account}_total")
+
+    # Price sensors this entry claims.
     for pair in futures_pairs:
-        desired_unique_ids.add(f"binance_futures_{pair}")
+        desired_own_uids.add(f"binance_futures_{pair}")
     for pair in spot_pairs:
-        desired_unique_ids.add(f"binance_spot_{pair}")
+        desired_own_uids.add(f"binance_spot_{pair}")
 
-    # Wallet sensors are per-account (use entry_id)
-    formatted_account = account_name.lower().replace(" ", "_")
-    if coordinator.data and coordinator.data.get(WALLET_DATA):
-        for wallet_name in coordinator.data[WALLET_DATA]:
-            formatted_name = wallet_name.lower().replace(" ", "_")
-            desired_unique_ids.add(
-                f"binance_wallet_{formatted_account}_{formatted_name}_btc"
-            )
-            desired_unique_ids.add(
-                f"binance_wallet_{formatted_account}_{formatted_name}_usdt"
-            )
+    # Union of ALL entries' price UIDs (so we don't delete a sensor
+    # that another entry still needs).
+    all_price_uids = _all_desired_price_uids(hass)
 
-    # --- Remove stale entities belonging to THIS entry ---
-    registered_entities = [
-        entry
-        for entry in entity_registry.entities.values()
-        if entry.config_entry_id == config_entry.entry_id
-    ]
-
-    for entity in registered_entities:
-        if entity.unique_id not in desired_unique_ids:
-            _LOGGER.debug(
-                "Removing stale sensor: %s (%s)", entity.entity_id, entity.unique_id
-            )
-            entity_registry.async_remove(entity.entity_id)
+    # --- Remove stale entities for THIS config entry ---
+    for entity in list(entity_registry.entities.values()):
+        if entity.config_entry_id != config_entry.entry_id:
+            continue
+        if entity.unique_id in desired_own_uids:
+            continue
+        # Don't remove if another entry still wants this price sensor.
+        if entity.unique_id in all_price_uids:
+            continue
+        _LOGGER.debug(
+            "Removing stale sensor: %s (%s)", entity.entity_id, entity.unique_id
+        )
+        entity_registry.async_remove(entity.entity_id)
 
     # --- Create sensors ---
-    sensors_to_add = []
+    sensors: list[SensorEntity] = []
 
-    # Price sensors: only add if no other entry already registered this unique_id
+    # Price sensors — only create if not yet registered by ANY entry.
     for pair in futures_pairs:
         uid = f"binance_futures_{pair}"
-        existing = entity_registry.async_get_entity_id("sensor", DOMAIN, uid)
-        if existing is None:
-            sensors_to_add.append(BinancePriceSensor(coordinator, pair, "futures"))
+        if entity_registry.async_get_entity_id("sensor", DOMAIN, uid) is None:
+            sensors.append(
+                BinancePriceSensor(price_coordinator, pair, "futures")
+            )
 
     for pair in spot_pairs:
         uid = f"binance_spot_{pair}"
-        existing = entity_registry.async_get_entity_id("sensor", DOMAIN, uid)
-        if existing is None:
-            sensors_to_add.append(BinancePriceSensor(coordinator, pair, "spot"))
-
-    # Wallet sensors: always per-account
-    if coordinator.data and coordinator.data.get(WALLET_DATA):
-        for wallet_name in coordinator.data[WALLET_DATA].keys():
-            sensors_to_add.append(
-                BinanceWalletBtcSensor(
-                    coordinator, wallet_name, account_name, entry_id
-                )
-            )
-            sensors_to_add.append(
-                BinanceWalletUsdtSensor(
-                    coordinator, wallet_name, account_name, entry_id
-                )
+        if entity_registry.async_get_entity_id("sensor", DOMAIN, uid) is None:
+            sensors.append(
+                BinancePriceSensor(price_coordinator, pair, "spot")
             )
 
-    async_add_entities(sensors_to_add)
+    # Wallet sensors — per-account.
+    for wallet_name in wallet_data:
+        sensors.append(
+            BinanceWalletSensor(
+                account_coordinator, price_coordinator,
+                wallet_name, account_name, entry_id, "btc",
+            )
+        )
+        sensors.append(
+            BinanceWalletSensor(
+                account_coordinator, price_coordinator,
+                wallet_name, account_name, entry_id, "usdt",
+            )
+        )
+
+    # PnL sensor — per-account.
+    sensors.append(BinancePnlSensor(account_coordinator, account_name, entry_id))
+
+    async_add_entities(sensors)
+
+
+# ======================================================================
+# Price Sensor (uses shared price coordinator)
+# ======================================================================
 
 
 class BinancePriceSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a Binance Price Sensor."""
+    """Binance trading pair price sensor."""
 
-    def __init__(self, coordinator, symbol, market_type):
-        """Initialize the sensor."""
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, symbol: str, market_type: str) -> None:
         super().__init__(coordinator)
         self._symbol = symbol
         self._market_type = market_type
-        self._attr_name = f"Binance {market_type.capitalize()} {self._symbol} Price"
-        self._attr_unique_id = f"binance_{self._market_type}_{self._symbol}"
+        self._data_key = FUTURES_DATA if market_type == "futures" else SPOT_DATA
 
-        # Determine quote asset for dynamic icon and unit
-        self._quote_asset = None
-        for asset in sorted(UNIT_MAP.keys(), key=len, reverse=True):
-            if self._symbol.endswith(asset):
-                self._quote_asset = asset
-                break
+        self._attr_name = f"Binance {market_type.capitalize()} {symbol} Price"
+        self._attr_unique_id = f"binance_{market_type}_{symbol}"
 
-        self._attr_icon = ICON_MAP.get(self._quote_asset, "mdi:cash")
-        self._attr_native_unit_of_measurement = UNIT_MAP.get(self._quote_asset)
-
-    @property
-    def data_key(self):
-        return FUTURES_DATA if self._market_type == "futures" else SPOT_DATA
+        quote = _resolve_quote_asset(symbol)
+        if quote and quote in QUOTE_ASSET_CONFIG:
+            info = QUOTE_ASSET_CONFIG[quote]
+            self._attr_native_unit_of_measurement = info.unit
+            self._attr_icon = info.icon
+            if info.unit in FIAT_UNITS:
+                self._attr_device_class = SensorDeviceClass.MONETARY
+        else:
+            self._attr_icon = "mdi:cash"
 
     @property
-    def symbol_data(self):
-        if self.coordinator.data and self.data_key in self.coordinator.data:
-            return self.coordinator.data[self.data_key].get(self._symbol)
+    def _symbol_data(self) -> dict | None:
+        data = self.coordinator.data
+        if data and self._data_key in data:
+            return data[self._data_key].get(self._symbol)
         return None
 
     @property
     def available(self) -> bool:
-        return super().available and self.symbol_data is not None
+        return super().available and self._symbol_data is not None
 
     @property
     def native_value(self):
-        if self.symbol_data:
-            return float(self.symbol_data.get("lastPrice"))
+        sym = self._symbol_data
+        if sym:
+            return float(sym.get("lastPrice", 0))
         return None
 
     @property
-    def extra_state_attributes(self):
-        if self.symbol_data:
-            return {
-                "price_change_percent": float(
-                    self.symbol_data.get("priceChangePercent", 0)
-                ),
-                "high_price": float(self.symbol_data.get("highPrice", 0)),
-                "low_price": float(self.symbol_data.get("lowPrice", 0)),
-                "volume": float(self.symbol_data.get("volume", 0)),
-                "quote_volume": float(self.symbol_data.get("quoteVolume", 0)),
-            }
-        return {}
+    def extra_state_attributes(self) -> dict:
+        sym = self._symbol_data
+        if not sym:
+            return {}
+        return {
+            "price_change_percent": float(sym.get("priceChangePercent", 0)),
+            "high_price": float(sym.get("highPrice", 0)),
+            "low_price": float(sym.get("lowPrice", 0)),
+            "volume": float(sym.get("volume", 0)),
+            "quote_volume": float(sym.get("quoteVolume", 0)),
+        }
 
     @property
-    def device_info(self):
+    def device_info(self) -> dict:
         return {
             "identifiers": {(DOMAIN, f"binance_{self._market_type}_market")},
             "name": f"Binance {self._market_type.capitalize()} Market",
@@ -208,42 +221,87 @@ class BinancePriceSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class BinanceWalletBtcSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a single Binance Wallet Sensor in BTC."""
+# ======================================================================
+# Unified Wallet Sensor
+# ======================================================================
 
-    def __init__(self, coordinator, wallet_name, account_name, entry_id):
-        """Initialize the sensor."""
-        super().__init__(coordinator)
+
+class BinanceWalletSensor(CoordinatorEntity, SensorEntity):
+    """Binance wallet balance sensor (BTC or USDT equivalent)."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        account_coordinator,
+        price_coordinator,
+        wallet_name: str,
+        account_name: str,
+        entry_id: str,
+        currency: str,
+    ) -> None:
+        # CoordinatorEntity tracks the account coordinator for availability.
+        super().__init__(account_coordinator)
+        self._price_coordinator = price_coordinator
         self._wallet_name = wallet_name
-        self._account_name = account_name
+        self._currency = currency
         self._entry_id = entry_id
-        formatted_account = account_name.lower().replace(" ", "_")
-        formatted_name = wallet_name.lower().replace(" ", "_")
+        self._account_name = account_name
 
-        self._attr_name = f"Binance {self._account_name} {self._wallet_name} Wallet BTC"
+        fmt_account = account_name.lower().replace(" ", "_")
+        fmt_name = wallet_name.lower().replace(" ", "_")
+
         self._attr_unique_id = (
-            f"binance_wallet_{formatted_account}_{formatted_name}_btc"
+            f"binance_wallet_{fmt_account}_{fmt_name}_{currency}"
         )
-        self._attr_icon = "mdi:bitcoin"
-        self._attr_native_unit_of_measurement = "BTC"
+        self._attr_name = (
+            f"Binance {account_name} {wallet_name} Wallet {currency.upper()}"
+        )
+
+        if currency == "btc":
+            self._attr_icon = "mdi:bitcoin"
+            self._attr_native_unit_of_measurement = "BTC"
+        else:
+            self._attr_icon = "mdi:currency-usd"
+            self._attr_native_unit_of_measurement = "USD"
+            self._attr_device_class = SensorDeviceClass.MONETARY
 
     @property
     def available(self) -> bool:
-        return (
-            super().available
-            and self.coordinator.data is not None
-            and self.coordinator.data.get(WALLET_DATA) is not None
-            and self._wallet_name in self.coordinator.data[WALLET_DATA]
-        )
+        if not super().available:
+            return False
+        data = self.coordinator.data
+        if not data or self._wallet_name not in data.get(WALLET_DATA, {}):
+            return False
+        if self._currency == "usdt":
+            price_data = self._price_coordinator.data
+            if not price_data or price_data.get(BTCUSDT_PRICE) is None:
+                return False
+        return True
 
     @property
     def native_value(self):
-        if self.available:
-            return self.coordinator.data[WALLET_DATA].get(self._wallet_name)
-        return None
+        data = self.coordinator.data
+        if not data:
+            return None
+
+        btc_balance = data.get(WALLET_DATA, {}).get(self._wallet_name)
+        if btc_balance is None:
+            return None
+
+        if self._currency == "usdt":
+            price_data = self._price_coordinator.data
+            if not price_data:
+                return None
+            price = price_data.get(BTCUSDT_PRICE)
+            if price is None:
+                return None
+            return round(btc_balance * price, 2)
+
+        return btc_balance
 
     @property
-    def device_info(self):
+    def device_info(self) -> dict:
         return {
             "identifiers": {(DOMAIN, f"binance_account_{self._entry_id}")},
             "name": f"Binance {self._account_name}",
@@ -252,54 +310,69 @@ class BinanceWalletBtcSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class BinanceWalletUsdtSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a single Binance Wallet Sensor in USDT."""
+# ======================================================================
+# Futures PnL Sensor
+# ======================================================================
 
-    def __init__(self, coordinator, wallet_name, account_name, entry_id):
-        """Initialize the sensor."""
+
+class BinancePnlSensor(CoordinatorEntity, SensorEntity):
+    """Total unrealized PnL across all open futures positions."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "USD"
+    _attr_icon = "mdi:chart-line"
+
+    def __init__(self, coordinator, account_name: str, entry_id: str) -> None:
         super().__init__(coordinator)
-        self._wallet_name = wallet_name
-        self._account_name = account_name
         self._entry_id = entry_id
-        formatted_account = account_name.lower().replace(" ", "_")
-        formatted_name = wallet_name.lower().replace(" ", "_")
+        self._account_name = account_name
+        fmt_account = account_name.lower().replace(" ", "_")
 
-        self._attr_name = (
-            f"Binance {self._account_name} {self._wallet_name} Wallet USDT"
-        )
-        self._attr_unique_id = (
-            f"binance_wallet_{formatted_account}_{formatted_name}_usdt"
-        )
-        self._attr_icon = "mdi:currency-usd"
-        self._attr_native_unit_of_measurement = "USDT"
+        self._attr_unique_id = f"binance_pnl_{fmt_account}_total"
+        self._attr_name = f"Binance {account_name} Futures PnL"
+
+    @property
+    def _positions(self) -> list[dict]:
+        data = self.coordinator.data
+        if data:
+            return data.get(PNL_DATA, [])
+        return []
 
     @property
     def available(self) -> bool:
-        return (
-            super().available
-            and self.coordinator.data is not None
-            and self.coordinator.data.get(WALLET_DATA) is not None
-            and self.coordinator.data.get(BTCUSDT_PRICE) is not None
-            and self._wallet_name in self.coordinator.data[WALLET_DATA]
-        )
+        return super().available and self.coordinator.data is not None
 
     @property
     def native_value(self):
-        """Return the state of the sensor (balance in USDT)."""
-        if not self.available:
-            return None
-
-        btc_balance = self.coordinator.data[WALLET_DATA].get(self._wallet_name)
-        btcusdt_price = self.coordinator.data.get(BTCUSDT_PRICE)
-
-        if btc_balance is None or btcusdt_price is None:
-            return None
-
-        return round(btc_balance * btcusdt_price, 2)
+        positions = self._positions
+        if not positions:
+            return 0.0
+        return round(sum(p["unRealizedProfit"] for p in positions), 2)
 
     @property
-    def device_info(self):
-        """Return device information to group wallet sensors under one account device."""
+    def extra_state_attributes(self) -> dict:
+        positions = self._positions
+        if not positions:
+            return {"open_positions": 0}
+
+        attrs = {"open_positions": len(positions)}
+        for pos in positions:
+            prefix = pos["symbol"]
+            side = pos.get("positionSide", "BOTH")
+            if side != "BOTH":
+                prefix = f"{prefix}_{side}"
+            attrs[f"{prefix}_amount"] = pos["positionAmt"]
+            attrs[f"{prefix}_entry_price"] = pos["entryPrice"]
+            attrs[f"{prefix}_mark_price"] = pos["markPrice"]
+            attrs[f"{prefix}_pnl"] = pos["unRealizedProfit"]
+            attrs[f"{prefix}_leverage"] = pos["leverage"]
+            attrs[f"{prefix}_margin_type"] = pos["marginType"]
+            attrs[f"{prefix}_liquidation_price"] = pos["liquidationPrice"]
+        return attrs
+
+    @property
+    def device_info(self) -> dict:
         return {
             "identifiers": {(DOMAIN, f"binance_account_{self._entry_id}")},
             "name": f"Binance {self._account_name}",

@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Binance Account",
+        "description": "Enter your Binance API credentials. The API key needs 'Read' permission for wallet balance and futures data.",
+        "data": {
+          "account_name": "Account Name",
+          "api_key": "API Key",
+          "api_secret": "API Secret",
+          "futures_pairs": "Futures Pairs",
+          "spot_pairs": "Spot Pairs"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Binance API",
+      "invalid_api_key": "Invalid API key or secret",
+      "api_permission_denied": "API key lacks required permissions (enable 'Read' access)",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "cannot_connect": "Failed to connect to Binance API",
+      "unknown": "Unexpected error occurred"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Binance Options",
+        "data": {
+          "futures_pairs": "Futures Pairs",
+          "spot_pairs": "Spot Pairs",
+          "update_interval": "Update Interval (seconds)",
+          "use_websocket": "Use WebSocket for real-time prices"
+        }
+      }
+    }
+  }
+}
