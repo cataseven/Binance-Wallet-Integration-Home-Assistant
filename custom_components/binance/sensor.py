@@ -19,7 +19,6 @@ from .const import (
     CONF_FUTURES_PAIRS,
     CONF_SPOT_PAIRS,
     DOMAIN,
-    FIAT_UNITS,
     FUTURES_DATA,
     PNL_DATA,
     QUOTE_ASSET_CONFIG,
@@ -175,8 +174,6 @@ class BinancePriceSensor(CoordinatorEntity, SensorEntity):
             info = QUOTE_ASSET_CONFIG[quote]
             self._attr_native_unit_of_measurement = info.unit
             self._attr_icon = info.icon
-            if info.unit in FIAT_UNITS:
-                self._attr_device_class = SensorDeviceClass.MONETARY
         else:
             self._attr_icon = "mdi:cash"
 
@@ -229,8 +226,6 @@ class BinancePriceSensor(CoordinatorEntity, SensorEntity):
 class BinanceWalletSensor(CoordinatorEntity, SensorEntity):
     """Binance wallet balance sensor (BTC or USDT equivalent)."""
 
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
     def __init__(
         self,
         account_coordinator,
@@ -261,10 +256,12 @@ class BinanceWalletSensor(CoordinatorEntity, SensorEntity):
         if currency == "btc":
             self._attr_icon = "mdi:bitcoin"
             self._attr_native_unit_of_measurement = "BTC"
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         else:
             self._attr_icon = "mdi:currency-usd"
             self._attr_native_unit_of_measurement = "USD"
             self._attr_device_class = SensorDeviceClass.MONETARY
+            self._attr_state_class = SensorStateClass.TOTAL
 
     @property
     def available(self) -> bool:
@@ -318,7 +315,7 @@ class BinanceWalletSensor(CoordinatorEntity, SensorEntity):
 class BinancePnlSensor(CoordinatorEntity, SensorEntity):
     """Total unrealized PnL across all open futures positions."""
 
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = "USD"
     _attr_icon = "mdi:chart-line"
