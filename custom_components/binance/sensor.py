@@ -114,20 +114,37 @@ async def async_setup_entry(
     # --- Create sensors ---
     sensors: list[SensorEntity] = []
 
-    # Price sensors — only create if not yet registered by ANY entry.
+    # Price sensors — create if:
+    #   1. Not registered at all (new sensor), OR
+    #   2. Already registered under THIS entry (restore on HA restart)
+    # Skip only if registered under a DIFFERENT entry (avoid duplicates).
     for pair in futures_pairs:
         uid = f"binance_futures_{pair}"
-        if entity_registry.async_get_entity_id("sensor", DOMAIN, uid) is None:
+        existing_eid = entity_registry.async_get_entity_id("sensor", DOMAIN, uid)
+        if existing_eid is None:
             sensors.append(
                 BinancePriceSensor(price_coordinator, pair, "futures")
             )
+        else:
+            entity_entry = entity_registry.async_get(existing_eid)
+            if entity_entry and entity_entry.config_entry_id == config_entry.entry_id:
+                sensors.append(
+                    BinancePriceSensor(price_coordinator, pair, "futures")
+                )
 
     for pair in spot_pairs:
         uid = f"binance_spot_{pair}"
-        if entity_registry.async_get_entity_id("sensor", DOMAIN, uid) is None:
+        existing_eid = entity_registry.async_get_entity_id("sensor", DOMAIN, uid)
+        if existing_eid is None:
             sensors.append(
                 BinancePriceSensor(price_coordinator, pair, "spot")
             )
+        else:
+            entity_entry = entity_registry.async_get(existing_eid)
+            if entity_entry and entity_entry.config_entry_id == config_entry.entry_id:
+                sensors.append(
+                    BinancePriceSensor(price_coordinator, pair, "spot")
+                )
 
     # Wallet sensors — per-account.
     for wallet_name in wallet_data:
