@@ -1,6 +1,13 @@
 # Binance Wallet and Prices Integration for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+![Downloads](https://img.shields.io/github/downloads/cataseven/Binance-Wallet-Integration-Home-Assistant/total?color=41BDF5&logo=home-assistant&label=Downloads&suffix=%20downloads&style=for-the-badge)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/frontend)
+[![GitHub Release](https://img.shields.io/github/release/cataseven/Binance-Wallet-Integration-Home-Assistant.svg)](https://github.com/cataseven/Binance-Wallet-Integration-Home-Assistant/releases)
+[![License](https://img.shields.io/github/license/cataseven/Binance-Wallet-Integration-Home-Assistant.svg)](LICENSE)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1.0%2B-blue.svg)
+![Maintenance](https://img.shields.io/maintenance/yes/2026.svg)
+[![GitHub Stars](https://img.shields.io/github/stars/cataseven/Binance-Wallet-Integration-Home-Assistant?style=social)](https://github.com/cataseven/Binance-Wallet-Integration-Home-Assistant)
+[![GitHub Issues](https://img.shields.io/github/issues/cataseven/Binance-Wallet-Integration-Home-Assistant?style=flat-square)](https://github.com/cataseven/Binance-Wallet-Integration-Home-Assistant/issues)
 
 This integration for Home Assistant allows you to track YOUR WALLET BALANCES from your Binance account and prices of spot and futures pairs real-time.
 
