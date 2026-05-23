@@ -36,7 +36,12 @@ SPOT_API_URL = "https://api.binance.com"
 
 # --- WebSocket Endpoints ---
 SPOT_WS_URL = "wss://stream.binance.com:9443/stream"
-FUTURES_WS_URL = "wss://fstream.binance.com/stream"
+# Binance migrated USDⓈ-M Futures WebSocket routing on 2026-04-23.
+# @ticker / @markPrice / @kline streams now live under "/market".
+# Spot WebSocket (above) was NOT affected by this change.
+# See: https://developers.binance.com/docs/derivatives/usds-margined-futures/
+#      websocket-market-streams/Important-WebSocket-Change-Notice
+FUTURES_WS_URL = "wss://fstream.binance.com/market/stream"
 
 # --- WebSocket ---
 WS_MAX_STREAMS_PER_CONNECTION = 200
