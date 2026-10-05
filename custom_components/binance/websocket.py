@@ -8,6 +8,7 @@ from typing import Any
 import aiohttp
 
 from .const import (
+    BTCUSDT_PRICE,
     FUTURES_DATA,
     FUTURES_WS_URL,
     SPOT_DATA,
@@ -176,4 +177,18 @@ class BinanceWebSocketManager:
             return
 
         coord_data[data_key][symbol] = ticker
-        self._coordinator.async_set_updated_data(coord_data)
+
+        # Keep the BTCUSDT reference price live when its spot ticker
+        # is among the streamed pairs (REST refresh covers it otherwise).
+        if data_key == SPOT_DATA and symbol == "BTCUSDT":
+            try:
+                coord_data[BTCUSDT_PRICE] = float(ticker["lastPrice"])
+            except (TypeError, ValueError):
+                pass
+
+        # Notify entities WITHOUT async_set_updated_data(): that call also
+        # resets the coordinator's periodic refresh timer, and with ticker
+        # messages arriving every second the scheduled _async_update_data()
+        # would never fire again — freezing the BTCUSDT reference price
+        # that the wallet USD fallback path multiplies by.
+        self._coordinator.async_update_listeners()

@@ -26,6 +26,7 @@ from .const import (
     SHARED_KEY,
     SPOT_DATA,
     WALLET_DATA,
+    WALLET_USD_DATA,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -285,13 +286,18 @@ class BinanceWalletSensor(CoordinatorEntity, SensorEntity):
         if not super().available:
             return False
         data = self.coordinator.data
-        if not data or self._wallet_name not in data.get(WALLET_DATA, {}):
+        if not data:
             return False
         if self._currency == "usdt":
-            price_data = self._price_coordinator.data
-            if not price_data or price_data.get(BTCUSDT_PRICE) is None:
+            # Preferred: USDT valuation straight from Binance.
+            if self._wallet_name in data.get(WALLET_USD_DATA, {}):
+                return True
+            # Fallback: BTC balance × cached BTCUSDT reference price.
+            if self._wallet_name not in data.get(WALLET_DATA, {}):
                 return False
-        return True
+            price_data = self._price_coordinator.data
+            return bool(price_data) and price_data.get(BTCUSDT_PRICE) is not None
+        return self._wallet_name in data.get(WALLET_DATA, {})
 
     @property
     def native_value(self):
@@ -299,11 +305,15 @@ class BinanceWalletSensor(CoordinatorEntity, SensorEntity):
         if not data:
             return None
 
-        btc_balance = data.get(WALLET_DATA, {}).get(self._wallet_name)
-        if btc_balance is None:
-            return None
-
         if self._currency == "usdt":
+            # Preferred: USDT valuation straight from Binance.
+            usd_balance = data.get(WALLET_USD_DATA, {}).get(self._wallet_name)
+            if usd_balance is not None:
+                return round(usd_balance, 2)
+            # Fallback: BTC balance × cached BTCUSDT reference price.
+            btc_balance = data.get(WALLET_DATA, {}).get(self._wallet_name)
+            if btc_balance is None:
+                return None
             price_data = self._price_coordinator.data
             if not price_data:
                 return None
@@ -312,7 +322,7 @@ class BinanceWalletSensor(CoordinatorEntity, SensorEntity):
                 return None
             return round(btc_balance * price, 2)
 
-        return btc_balance
+        return data.get(WALLET_DATA, {}).get(self._wallet_name)
 
     @property
     def device_info(self) -> dict:

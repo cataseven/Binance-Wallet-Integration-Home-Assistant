@@ -59,6 +59,7 @@ from .const import (
     SPOT_API_URL,
     SPOT_DATA,
     WALLET_DATA,
+    WALLET_USD_DATA,
 )
 from .websocket import BinanceWebSocketManager
 
@@ -260,6 +261,18 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                     api_key=self.api_key,
                     api_secret=self.api_secret,
                     signed=True,
+                    params={"quoteAsset": "BTC"},
+                )
+                # Same endpoint valued directly in USDT by Binance — the
+                # USD wallet sensors read this instead of converting the
+                # BTC figure with a locally cached BTCUSDT price.
+                wallet_usd_task = _request(
+                    self.session,
+                    f"{SPOT_API_URL}/sapi/v1/asset/wallet/balance",
+                    api_key=self.api_key,
+                    api_secret=self.api_secret,
+                    signed=True,
+                    params={"quoteAsset": "USDT"},
                 )
                 pnl_task = _request(
                     self.session,
@@ -269,13 +282,14 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                     signed=True,
                 )
 
-                wallet_raw, pnl_raw = await asyncio.gather(
-                    wallet_task, pnl_task, return_exceptions=True
+                wallet_raw, wallet_usd_raw, pnl_raw = await asyncio.gather(
+                    wallet_task, wallet_usd_task, pnl_task,
+                    return_exceptions=True,
                 )
 
                 existing = self.data or {}
 
-                # Wallet
+                # Wallet (BTC valuation)
                 if isinstance(wallet_raw, Exception):
                     _LOGGER.warning("Wallet fetch failed: %s", wallet_raw)
                     wallet_data = existing.get(WALLET_DATA, {})
@@ -283,6 +297,18 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                     wallet_data = {
                         item["walletName"]: float(item["balance"])
                         for item in wallet_raw
+                    }
+
+                # Wallet (USDT valuation)
+                if isinstance(wallet_usd_raw, Exception):
+                    _LOGGER.warning(
+                        "Wallet USD fetch failed: %s", wallet_usd_raw
+                    )
+                    wallet_usd_data = existing.get(WALLET_USD_DATA, {})
+                else:
+                    wallet_usd_data = {
+                        item["walletName"]: float(item["balance"])
+                        for item in wallet_usd_raw
                     }
 
                 # PnL — keep only open positions
@@ -308,7 +334,11 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                         if float(p.get("positionAmt", 0)) != 0
                     ]
 
-                return {WALLET_DATA: wallet_data, PNL_DATA: pnl_data}
+                return {
+                    WALLET_DATA: wallet_data,
+                    WALLET_USD_DATA: wallet_usd_data,
+                    PNL_DATA: pnl_data,
+                }
 
         except UpdateFailed:
             raise

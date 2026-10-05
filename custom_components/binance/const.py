@@ -25,6 +25,7 @@ BTCUSDT_PRICE = "btcusdt_price"
 
 # --- Data Keys (per-account coordinator) ---
 WALLET_DATA = "wallet_data"
+WALLET_USD_DATA = "wallet_usd_data"
 PNL_DATA = "pnl_data"
 
 # --- hass.data layout keys ---
