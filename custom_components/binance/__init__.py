@@ -51,6 +51,7 @@ from .const import (
     DOMAIN,
     FUTURES_API_URL,
     FUTURES_DATA,
+    MARGIN_DATA,
     PNL_DATA,
     PLATFORMS,
     RATE_LIMIT_BACKOFF_BASE,
@@ -121,6 +122,76 @@ async def _request(
             )
         resp.raise_for_status()
         return await resp.json()
+
+
+def _margin_ratio(maint_margin: float, margin_balance: float) -> float | None:
+    """Margin ratio in % — Binance liquidates when it reaches 100."""
+    if maint_margin == 0:
+        return 0.0
+    if margin_balance <= 0:
+        return None
+    return round(maint_margin / margin_balance * 100, 2)
+
+
+def _build_margin_data(account: dict) -> dict:
+    """Extract margin-ratio data from a /fapi/v2/account response.
+
+    Cross positions share one account-wide ratio (cross maintenance margin
+    over cross margin balance); isolated positions each carry their own,
+    computed from the position's isolated wallet + unrealized PnL. This
+    mirrors the ratios Binance shows in the Futures UI.
+    """
+    cross_margin_balance = float(
+        account.get("totalCrossWalletBalance", 0)
+    ) + float(account.get("totalCrossUnPnl", 0))
+
+    cross_maint = 0.0
+    positions: dict[str, dict] = {}
+
+    for pos in account.get("positions", []):
+        if float(pos.get("positionAmt", 0)) == 0:
+            continue
+        maint = float(pos.get("maintMargin", 0))
+        key = f"{pos['symbol']}:{pos.get('positionSide', 'BOTH')}"
+        if pos.get("isolated"):
+            iso_balance = float(pos.get("isolatedWallet", 0)) + float(
+                pos.get("unrealizedProfit", 0)
+            )
+            positions[key] = {
+                "margin_type": "isolated",
+                "maint_margin": maint,
+                "margin_balance": iso_balance,
+                "margin_ratio": _margin_ratio(maint, iso_balance),
+            }
+        else:
+            cross_maint += maint
+            positions[key] = {
+                "margin_type": "cross",
+                "maint_margin": maint,
+                # Filled in below once cross_maint is fully summed.
+                "margin_balance": None,
+                "margin_ratio": None,
+            }
+
+    cross_ratio = _margin_ratio(cross_maint, cross_margin_balance)
+    for detail in positions.values():
+        if detail["margin_type"] == "cross":
+            detail["margin_balance"] = cross_margin_balance
+            detail["margin_ratio"] = cross_ratio
+
+    return {
+        "margin_ratio": cross_ratio,
+        "maint_margin": cross_maint,
+        "margin_balance": cross_margin_balance,
+        "total_margin_ratio": _margin_ratio(
+            float(account.get("totalMaintMargin", 0)),
+            float(account.get("totalMarginBalance", 0)),
+        ),
+        "total_maint_margin": float(account.get("totalMaintMargin", 0)),
+        "total_margin_balance": float(account.get("totalMarginBalance", 0)),
+        "available_balance": float(account.get("availableBalance", 0)),
+        "positions": positions,
+    }
 
 
 # ======================================================================
@@ -281,10 +352,19 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                     api_secret=self.api_secret,
                     signed=True,
                 )
+                account_task = _request(
+                    self.session,
+                    f"{FUTURES_API_URL}/fapi/v2/account",
+                    api_key=self.api_key,
+                    api_secret=self.api_secret,
+                    signed=True,
+                )
 
-                wallet_raw, wallet_usd_raw, pnl_raw = await asyncio.gather(
-                    wallet_task, wallet_usd_task, pnl_task,
-                    return_exceptions=True,
+                wallet_raw, wallet_usd_raw, pnl_raw, account_raw = (
+                    await asyncio.gather(
+                        wallet_task, wallet_usd_task, pnl_task, account_task,
+                        return_exceptions=True,
+                    )
                 )
 
                 existing = self.data or {}
@@ -334,10 +414,20 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                         if float(p.get("positionAmt", 0)) != 0
                     ]
 
+                # Margin — account-level + per-position margin ratios
+                if isinstance(account_raw, Exception):
+                    _LOGGER.warning(
+                        "Futures account fetch failed: %s", account_raw
+                    )
+                    margin_data = existing.get(MARGIN_DATA, {})
+                else:
+                    margin_data = _build_margin_data(account_raw)
+
                 return {
                     WALLET_DATA: wallet_data,
                     WALLET_USD_DATA: wallet_usd_data,
                     PNL_DATA: pnl_data,
+                    MARGIN_DATA: margin_data,
                 }
 
         except UpdateFailed:

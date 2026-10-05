@@ -27,6 +27,7 @@ BTCUSDT_PRICE = "btcusdt_price"
 WALLET_DATA = "wallet_data"
 WALLET_USD_DATA = "wallet_usd_data"
 PNL_DATA = "pnl_data"
+MARGIN_DATA = "margin_data"
 
 # --- hass.data layout keys ---
 SHARED_KEY = "_shared"

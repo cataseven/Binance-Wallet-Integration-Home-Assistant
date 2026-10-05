@@ -8,6 +8,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
@@ -20,6 +21,7 @@ from .const import (
     CONF_SPOT_PAIRS,
     DOMAIN,
     FUTURES_DATA,
+    MARGIN_DATA,
     PNL_DATA,
     QUOTE_ASSET_CONFIG,
     QUOTE_ASSET_KEYS_SORTED,
@@ -81,12 +83,19 @@ async def async_setup_entry(
     desired_own_uids: set[str] = set()
 
     fmt_account = account_name.lower().replace(" ", "_")
-    wallet_data = (account_coordinator.data or {}).get(WALLET_DATA, {})
-    for wallet_name in wallet_data:
+    coord_data = account_coordinator.data or {}
+    # Union of both valuations' wallet names: one failed fetch during a
+    # reload must not orphan the other currency's sensors.
+    wallet_names = sorted(
+        set(coord_data.get(WALLET_DATA, {}))
+        | set(coord_data.get(WALLET_USD_DATA, {}))
+    )
+    for wallet_name in wallet_names:
         fmt_name = wallet_name.lower().replace(" ", "_")
         desired_own_uids.add(f"binance_wallet_{fmt_account}_{fmt_name}_btc")
         desired_own_uids.add(f"binance_wallet_{fmt_account}_{fmt_name}_usdt")
     desired_own_uids.add(f"binance_pnl_{fmt_account}_total")
+    desired_own_uids.add(f"binance_margin_ratio_{fmt_account}")
 
     # Price sensors this entry claims.
     for pair in futures_pairs:
@@ -106,6 +115,10 @@ async def async_setup_entry(
             continue
         # Don't remove if another entry still wants this price sensor.
         if entity.unique_id in all_price_uids:
+            continue
+        # If BOTH wallet fetches failed (transient outage during reload),
+        # keep the registered wallet entities instead of wiping them.
+        if not wallet_names and entity.unique_id.startswith("binance_wallet_"):
             continue
         _LOGGER.debug(
             "Removing stale sensor: %s (%s)", entity.entity_id, entity.unique_id
@@ -148,7 +161,7 @@ async def async_setup_entry(
                 )
 
     # Wallet sensors — per-account.
-    for wallet_name in wallet_data:
+    for wallet_name in wallet_names:
         sensors.append(
             BinanceWalletSensor(
                 account_coordinator, price_coordinator,
@@ -164,6 +177,11 @@ async def async_setup_entry(
 
     # PnL sensor — per-account.
     sensors.append(BinancePnlSensor(account_coordinator, account_name, entry_id))
+
+    # Margin ratio sensor — per-account.
+    sensors.append(
+        BinanceMarginRatioSensor(account_coordinator, account_name, entry_id)
+    )
 
     async_add_entities(sensors)
 
@@ -380,6 +398,10 @@ class BinancePnlSensor(CoordinatorEntity, SensorEntity):
         if not positions:
             return {"open_positions": 0}
 
+        margin_positions = (self.coordinator.data or {}).get(
+            MARGIN_DATA, {}
+        ).get("positions", {})
+
         attrs = {"open_positions": len(positions)}
         for pos in positions:
             prefix = pos["symbol"]
@@ -393,6 +415,85 @@ class BinancePnlSensor(CoordinatorEntity, SensorEntity):
             attrs[f"{prefix}_leverage"] = pos["leverage"]
             attrs[f"{prefix}_margin_type"] = pos["marginType"]
             attrs[f"{prefix}_liquidation_price"] = pos["liquidationPrice"]
+            margin = margin_positions.get(f"{pos['symbol']}:{side}")
+            if margin and margin.get("margin_ratio") is not None:
+                attrs[f"{prefix}_margin_ratio"] = margin["margin_ratio"]
+        return attrs
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers": {(DOMAIN, f"binance_account_{self._entry_id}")},
+            "name": f"Binance {self._account_name}",
+            "manufacturer": "Binance",
+            "model": "Wallets",
+        }
+
+
+# ======================================================================
+# Futures Margin Ratio Sensor
+# ======================================================================
+
+
+class BinanceMarginRatioSensor(CoordinatorEntity, SensorEntity):
+    """Futures account margin ratio — liquidation risk indicator.
+
+    State is the cross-margin ratio Binance shows in the Futures UI:
+    maintenance margin / margin balance × 100. Cross positions are
+    liquidated when it reaches 100%. Isolated positions carry their own
+    per-position ratio, exposed through the attributes.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 2
+    _attr_icon = "mdi:gauge"
+
+    def __init__(self, coordinator, account_name: str, entry_id: str) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._account_name = account_name
+        fmt_account = account_name.lower().replace(" ", "_")
+
+        self._attr_unique_id = f"binance_margin_ratio_{fmt_account}"
+        self._attr_name = f"Binance {account_name} Futures Margin Ratio"
+
+    @property
+    def _margin(self) -> dict:
+        data = self.coordinator.data
+        if data:
+            return data.get(MARGIN_DATA, {})
+        return {}
+
+    @property
+    def available(self) -> bool:
+        return super().available and bool(self._margin)
+
+    @property
+    def native_value(self):
+        return self._margin.get("margin_ratio")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        margin = self._margin
+        if not margin:
+            return {}
+
+        attrs = {
+            "maintenance_margin": margin.get("maint_margin"),
+            "margin_balance": margin.get("margin_balance"),
+            "total_margin_ratio": margin.get("total_margin_ratio"),
+            "total_maintenance_margin": margin.get("total_maint_margin"),
+            "total_margin_balance": margin.get("total_margin_balance"),
+            "available_balance": margin.get("available_balance"),
+        }
+        for key, detail in margin.get("positions", {}).items():
+            symbol, _, side = key.partition(":")
+            prefix = symbol if side == "BOTH" else f"{symbol}_{side}"
+            attrs[f"{prefix}_margin_ratio"] = detail["margin_ratio"]
+            attrs[f"{prefix}_margin_type"] = detail["margin_type"]
+            attrs[f"{prefix}_maintenance_margin"] = detail["maint_margin"]
+            attrs[f"{prefix}_margin_balance"] = detail["margin_balance"]
         return attrs
 
     @property

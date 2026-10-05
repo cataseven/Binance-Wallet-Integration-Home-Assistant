@@ -180,11 +180,15 @@ class BinanceWebSocketManager:
 
         # Keep the BTCUSDT reference price live when its spot ticker
         # is among the streamed pairs (REST refresh covers it otherwise).
+        # A frame without a usable price (normalizer defaults to "0")
+        # must not zero the reference.
         if data_key == SPOT_DATA and symbol == "BTCUSDT":
             try:
-                coord_data[BTCUSDT_PRICE] = float(ticker["lastPrice"])
+                price = float(ticker["lastPrice"])
             except (TypeError, ValueError):
-                pass
+                price = 0.0
+            if price > 0:
+                coord_data[BTCUSDT_PRICE] = price
 
         # Notify entities WITHOUT async_set_updated_data(): that call also
         # resets the coordinator's periodic refresh timer, and with ticker
