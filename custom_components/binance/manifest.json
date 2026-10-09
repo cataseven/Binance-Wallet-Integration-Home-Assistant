@@ -8,5 +8,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/cataseven/Binance-Wallet-Integration-Home-Assistant/issues",
   "requirements": [],
-  "version": "2.2.0"
+  "version": "2.2.1"
 }

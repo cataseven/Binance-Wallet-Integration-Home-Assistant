@@ -27,8 +27,10 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import math
 import time
 from datetime import timedelta
+from functools import partial
 from http import HTTPStatus
 
 import aiohttp
@@ -124,6 +126,91 @@ async def _request(
         return await resp.json()
 
 
+# What a malformed payload raises while being parsed. Transport errors are
+# separate: asyncio.gather(return_exceptions=True) hands those back as values.
+_PARSE_ERRORS = (KeyError, TypeError, ValueError, AttributeError)
+
+
+def _to_float(value, default: float | None = 0.0) -> float | None:
+    """float() for Binance's string-encoded numbers.
+
+    Some accounts receive "" instead of a number (seen for every balance
+    field of /fapi/v2/account), so a bare float() would abort the refresh.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _parse_section(failed: set[str], section: str, parser, raw, fallback):
+    """Parse one endpoint's payload; keep *fallback* if it is malformed.
+
+    Sections are independent, so an unexpected futures payload cannot take
+    the wallet sensors down with it. Logs once per failure streak.
+    """
+    try:
+        result = parser(raw)
+    except _PARSE_ERRORS as err:
+        if section not in failed:
+            failed.add(section)
+            _LOGGER.warning(
+                "Unexpected %s response from Binance, keeping previous data: %r",
+                section,
+                err,
+            )
+        return fallback
+    if section in failed:
+        failed.discard(section)
+        _LOGGER.info("Binance %s data recovered", section)
+    return result
+
+
+def _index_by_symbol(raw: list) -> dict[str, dict]:
+    """Ticker list → {symbol: ticker}."""
+    return {item["symbol"]: item for item in raw}
+
+
+def _parse_wallets(raw: list, previous: dict) -> dict[str, float | None]:
+    """walletName → balance.
+
+    A blank balance keeps the wallet's previous value instead of reading as
+    0, which would record a false balance drop and fire automations.
+    """
+    wallets: dict[str, float | None] = {}
+    for item in raw:
+        name = item["walletName"]
+        balance = _to_float(item.get("balance"), None)
+        wallets[name] = balance if balance is not None else previous.get(name)
+    return wallets
+
+
+def _parse_positions(raw: list) -> list[dict]:
+    """Open positions from /fapi/v2/positionRisk."""
+    positions = []
+    for p in raw:
+        amount = _to_float(p.get("positionAmt"))
+        if not amount:
+            continue
+        positions.append(
+            {
+                "symbol": p["symbol"],
+                "positionAmt": amount,
+                "entryPrice": _to_float(p.get("entryPrice")),
+                "markPrice": _to_float(p.get("markPrice")),
+                "unRealizedProfit": _to_float(p.get("unRealizedProfit")),
+                "liquidationPrice": _to_float(p.get("liquidationPrice")),
+                "leverage": int(_to_float(p.get("leverage"), 1) or 1),
+                "marginType": p.get("marginType", "cross"),
+                "positionSide": p.get("positionSide", "BOTH"),
+            }
+        )
+    return positions
+
+
 def _margin_ratio(maint_margin: float, margin_balance: float) -> float | None:
     """Margin ratio in % — Binance liquidates when it reaches 100."""
     if maint_margin == 0:
@@ -141,21 +228,23 @@ def _build_margin_data(account: dict) -> dict:
     computed from the position's isolated wallet + unrealized PnL. This
     mirrors the ratios Binance shows in the Futures UI.
     """
-    cross_margin_balance = float(
-        account.get("totalCrossWalletBalance", 0)
-    ) + float(account.get("totalCrossUnPnl", 0))
+    # Indexed, not .get(): an error body must raise rather than read as an
+    # empty account. Blank values, as some accounts receive, parse as 0.
+    cross_margin_balance = _to_float(
+        account["totalCrossWalletBalance"]
+    ) + _to_float(account.get("totalCrossUnPnl"))
 
     cross_maint = 0.0
     positions: dict[str, dict] = {}
 
-    for pos in account.get("positions", []):
-        if float(pos.get("positionAmt", 0)) == 0:
+    for pos in account.get("positions") or []:
+        if not _to_float(pos.get("positionAmt")):
             continue
-        maint = float(pos.get("maintMargin", 0))
+        maint = _to_float(pos.get("maintMargin"))
         key = f"{pos['symbol']}:{pos.get('positionSide', 'BOTH')}"
         if pos.get("isolated"):
-            iso_balance = float(pos.get("isolatedWallet", 0)) + float(
-                pos.get("unrealizedProfit", 0)
+            iso_balance = _to_float(pos.get("isolatedWallet")) + _to_float(
+                pos.get("unrealizedProfit")
             )
             positions[key] = {
                 "margin_type": "isolated",
@@ -179,17 +268,17 @@ def _build_margin_data(account: dict) -> dict:
             detail["margin_balance"] = cross_margin_balance
             detail["margin_ratio"] = cross_ratio
 
+    total_maint = _to_float(account.get("totalMaintMargin"))
+    total_balance = _to_float(account.get("totalMarginBalance"))
+
     return {
         "margin_ratio": cross_ratio,
         "maint_margin": cross_maint,
         "margin_balance": cross_margin_balance,
-        "total_margin_ratio": _margin_ratio(
-            float(account.get("totalMaintMargin", 0)),
-            float(account.get("totalMarginBalance", 0)),
-        ),
-        "total_maint_margin": float(account.get("totalMaintMargin", 0)),
-        "total_margin_balance": float(account.get("totalMarginBalance", 0)),
-        "available_balance": float(account.get("availableBalance", 0)),
+        "total_margin_ratio": _margin_ratio(total_maint, total_balance),
+        "total_maint_margin": total_maint,
+        "total_margin_balance": total_balance,
+        "available_balance": _to_float(account.get("availableBalance")),
         "positions": positions,
     }
 
@@ -212,6 +301,7 @@ class BinancePriceCoordinator(DataUpdateCoordinator):
         self.session = session
         self.use_websocket = use_websocket
         self._backoff_until: float = 0
+        self._failed_sections: set[str] = set()
 
         super().__init__(
             hass,
@@ -257,23 +347,33 @@ class BinancePriceCoordinator(DataUpdateCoordinator):
 
                 existing = self.data or {}
 
-                futures_data = (
-                    {i["symbol"]: i for i in fetched["futures"]}
-                    if "futures" in fetched
-                    and not isinstance(fetched["futures"], Exception)
-                    else existing.get(FUTURES_DATA, {})
-                )
-                spot_data = (
-                    {i["symbol"]: i for i in fetched["spot"]}
-                    if "spot" in fetched
-                    and not isinstance(fetched["spot"], Exception)
-                    else existing.get(SPOT_DATA, {})
-                )
-                btcusdt = (
-                    float(fetched["btcusdt"]["price"])
-                    if not isinstance(fetched.get("btcusdt"), Exception)
-                    else existing.get(BTCUSDT_PRICE)
-                )
+                futures_data = existing.get(FUTURES_DATA, {})
+                if "futures" in fetched and not isinstance(
+                    fetched["futures"], Exception
+                ):
+                    futures_data = _parse_section(
+                        self._failed_sections, "futures ticker",
+                        _index_by_symbol, fetched["futures"], futures_data,
+                    )
+
+                spot_data = existing.get(SPOT_DATA, {})
+                if "spot" in fetched and not isinstance(
+                    fetched["spot"], Exception
+                ):
+                    spot_data = _parse_section(
+                        self._failed_sections, "spot ticker",
+                        _index_by_symbol, fetched["spot"], spot_data,
+                    )
+
+                btcusdt = existing.get(BTCUSDT_PRICE)
+                if not isinstance(fetched["btcusdt"], Exception):
+                    price = _parse_section(
+                        self._failed_sections, "BTCUSDT price",
+                        lambda raw: _to_float(raw["price"], None),
+                        fetched["btcusdt"], None,
+                    )
+                    if price:
+                        btcusdt = price
 
                 return {
                     FUTURES_DATA: futures_data,
@@ -311,6 +411,7 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
         self.api_key = api_key
         self.api_secret = api_secret
         self._backoff_until: float = 0
+        self._failed_sections: set[str] = set()
 
         super().__init__(
             hass,
@@ -369,59 +470,53 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
 
                 existing = self.data or {}
 
+                failed = self._failed_sections
+
                 # Wallet (BTC valuation)
+                wallet_data = existing.get(WALLET_DATA, {})
                 if isinstance(wallet_raw, Exception):
                     _LOGGER.warning("Wallet fetch failed: %s", wallet_raw)
-                    wallet_data = existing.get(WALLET_DATA, {})
                 else:
-                    wallet_data = {
-                        item["walletName"]: float(item["balance"])
-                        for item in wallet_raw
-                    }
+                    wallet_data = _parse_section(
+                        failed, "wallet balance",
+                        partial(_parse_wallets, previous=wallet_data),
+                        wallet_raw, wallet_data,
+                    )
 
                 # Wallet (USDT valuation)
+                wallet_usd_data = existing.get(WALLET_USD_DATA, {})
                 if isinstance(wallet_usd_raw, Exception):
                     _LOGGER.warning(
                         "Wallet USD fetch failed: %s", wallet_usd_raw
                     )
-                    wallet_usd_data = existing.get(WALLET_USD_DATA, {})
                 else:
-                    wallet_usd_data = {
-                        item["walletName"]: float(item["balance"])
-                        for item in wallet_usd_raw
-                    }
+                    wallet_usd_data = _parse_section(
+                        failed, "wallet USD balance",
+                        partial(_parse_wallets, previous=wallet_usd_data),
+                        wallet_usd_raw, wallet_usd_data,
+                    )
 
                 # PnL — keep only open positions
+                pnl_data = existing.get(PNL_DATA, [])
                 if isinstance(pnl_raw, Exception):
                     _LOGGER.warning("PnL fetch failed: %s", pnl_raw)
-                    pnl_data = existing.get(PNL_DATA, [])
                 else:
-                    pnl_data = [
-                        {
-                            "symbol": p["symbol"],
-                            "positionAmt": float(p["positionAmt"]),
-                            "entryPrice": float(p["entryPrice"]),
-                            "markPrice": float(p["markPrice"]),
-                            "unRealizedProfit": float(p["unRealizedProfit"]),
-                            "liquidationPrice": float(
-                                p.get("liquidationPrice", 0)
-                            ),
-                            "leverage": int(p.get("leverage", 1)),
-                            "marginType": p.get("marginType", "cross"),
-                            "positionSide": p.get("positionSide", "BOTH"),
-                        }
-                        for p in pnl_raw
-                        if float(p.get("positionAmt", 0)) != 0
-                    ]
+                    pnl_data = _parse_section(
+                        failed, "futures position",
+                        _parse_positions, pnl_raw, pnl_data,
+                    )
 
                 # Margin — account-level + per-position margin ratios
+                margin_data = existing.get(MARGIN_DATA, {})
                 if isinstance(account_raw, Exception):
                     _LOGGER.warning(
                         "Futures account fetch failed: %s", account_raw
                     )
-                    margin_data = existing.get(MARGIN_DATA, {})
                 else:
-                    margin_data = _build_margin_data(account_raw)
+                    margin_data = _parse_section(
+                        failed, "futures account",
+                        _build_margin_data, account_raw, margin_data,
+                    )
 
                 return {
                     WALLET_DATA: wallet_data,
