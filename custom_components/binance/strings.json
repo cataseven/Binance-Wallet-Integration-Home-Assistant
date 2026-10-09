@@ -10,6 +10,10 @@
           "api_secret": "API Secret",
           "futures_pairs": "Futures Pairs",
           "spot_pairs": "Spot Pairs"
+        },
+        "data_description": {
+          "futures_pairs": "Type to search, e.g. BTC or ETHUSDT.",
+          "spot_pairs": "Type to search, e.g. BTC or ETHUSDT."
         }
       }
     },
@@ -32,7 +36,17 @@
           "futures_pairs": "Futures Pairs",
           "spot_pairs": "Spot Pairs",
           "update_interval": "Update Interval (seconds)",
-          "use_websocket": "Use WebSocket for real-time prices"
+          "use_websocket": "Use WebSocket for real-time prices",
+          "price_changes": "Multi-timeframe % changes on price sensors",
+          "funding_sensors": "Funding rate sensors for futures pairs",
+          "position_sensors": "Per-position PnL, ROE and liquidation distance sensors"
+        },
+        "data_description": {
+          "futures_pairs": "Type to search, e.g. BTC or ETHUSDT.",
+          "spot_pairs": "Type to search, e.g. BTC or ETHUSDT.",
+          "price_changes": "Adds change_1m … change_1M attributes (1m, 5m, 15m, 1h, 2h, 4h, 1d, 1w, 1M). Uses public kline data: one request per pair per minute.",
+          "funding_sensors": "Funding rate, next funding time, annualized rate, mark and index price. One public request per minute for all pairs.",
+          "position_sensors": "One set of sensors per open futures position. Position size, PnL and liquidation prices become visible to every Home Assistant user and are kept in history."
         }
       }
     }

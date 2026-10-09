@@ -13,15 +13,37 @@ CONF_FUTURES_PAIRS = "futures_pairs"
 CONF_SPOT_PAIRS = "spot_pairs"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_USE_WEBSOCKET = "use_websocket"
+CONF_PRICE_CHANGES = "price_changes"
+CONF_FUNDING_SENSORS = "funding_sensors"
+CONF_POSITION_SENSORS = "position_sensors"
 
 # --- Defaults ---
 DEFAULT_UPDATE_INTERVAL = 60  # seconds
 DEFAULT_USE_WEBSOCKET = True
+DEFAULT_PRICE_CHANGES = True
+DEFAULT_FUNDING_SENSORS = True
+DEFAULT_POSITION_SENSORS = True
 
 # --- Data Keys (shared price coordinator) ---
 FUTURES_DATA = "futures_data"
 SPOT_DATA = "spot_data"
 BTCUSDT_PRICE = "btcusdt_price"
+
+# --- Data Keys (shared market coordinator) ---
+CHANGE_REFS = "change_refs"
+FUNDING_DATA = "funding_data"
+
+# --- Market coordinator (klines + funding) ---
+MARKET_UPDATE_INTERVAL = 60  # seconds; 1m reference prices
+HOURLY_KLINES_REFRESH = 1800  # seconds; 1h candles for the 1w / 1M windows
+FUNDING_INFO_REFRESH = 3600  # seconds; per-symbol funding intervals
+DEFAULT_FUNDING_INTERVAL_HOURS = 8
+KLINE_CONCURRENCY = 8
+# Window name -> candles back. Reference = close N candles before the
+# current (in-progress) one, so each window needs N + 1 candles.
+MINUTE_WINDOWS = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "2h": 120, "4h": 240}
+HOUR_WINDOWS = {"1w": 168, "1M": 720}
+CHANGE_WINDOWS = ("1m", "5m", "15m", "1h", "2h", "4h", "1d", "1w", "1M")
 
 # --- Data Keys (per-account coordinator) ---
 WALLET_DATA = "wallet_data"

@@ -10,17 +10,27 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import (
     CONF_ACCOUNT_NAME,
     CONF_API_KEY,
     CONF_API_SECRET,
+    CONF_FUNDING_SENSORS,
     CONF_FUTURES_PAIRS,
+    CONF_POSITION_SENSORS,
+    CONF_PRICE_CHANGES,
     CONF_SPOT_PAIRS,
     CONF_UPDATE_INTERVAL,
     CONF_USE_WEBSOCKET,
+    DEFAULT_FUNDING_SENSORS,
+    DEFAULT_POSITION_SENSORS,
+    DEFAULT_PRICE_CHANGES,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_USE_WEBSOCKET,
     DOMAIN,
@@ -57,6 +67,21 @@ async def _get_symbols(session: aiohttp.ClientSession) -> tuple[list[str], list[
 
     _symbol_cache.update({"futures": futures_symbols, "spot": spot_symbols, "ts": now})
     return futures_symbols, spot_symbols
+
+
+def _pair_selector(symbols: list[str]) -> SelectSelector:
+    """Searchable multi-select for trading pairs.
+
+    No custom_value: HA then rejects anything outside Binance's own symbol
+    list server-side, which keeps arbitrary text out of the WS stream URL.
+    """
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=symbols,
+            multiple=True,
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
 
 
 async def _validate_api_credentials(
@@ -134,10 +159,10 @@ class BinanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_ACCOUNT_NAME): str,
                     vol.Required(CONF_API_KEY): str,
                     vol.Required(CONF_API_SECRET): str,
-                    vol.Optional(CONF_FUTURES_PAIRS, default=[]): cv.multi_select(
+                    vol.Optional(CONF_FUTURES_PAIRS, default=[]): _pair_selector(
                         futures_symbols
                     ),
-                    vol.Optional(CONF_SPOT_PAIRS, default=[]): cv.multi_select(
+                    vol.Optional(CONF_SPOT_PAIRS, default=[]): _pair_selector(
                         spot_symbols
                     ),
                 }
@@ -186,22 +211,44 @@ class BinanceOptionsFlowHandler(config_entries.OptionsFlow):
         current_ws = self.config_entry.options.get(
             CONF_USE_WEBSOCKET, DEFAULT_USE_WEBSOCKET
         )
+        options = self.config_entry.options
+        current_changes = options.get(CONF_PRICE_CHANGES, DEFAULT_PRICE_CHANGES)
+        current_funding = options.get(
+            CONF_FUNDING_SENSORS, DEFAULT_FUNDING_SENSORS
+        )
+        current_positions = options.get(
+            CONF_POSITION_SENSORS, DEFAULT_POSITION_SENSORS
+        )
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    # Configured pairs stay selectable even after Binance
+                    # delists them, so the form can still be saved and the
+                    # pair removed.
                     vol.Optional(
                         CONF_FUTURES_PAIRS, default=current_futures
-                    ): cv.multi_select(futures_symbols),
+                    ): _pair_selector(
+                        sorted(set(futures_symbols) | set(current_futures))
+                    ),
                     vol.Optional(
                         CONF_SPOT_PAIRS, default=current_spot
-                    ): cv.multi_select(spot_symbols),
+                    ): _pair_selector(sorted(set(spot_symbols) | set(current_spot))),
                     vol.Required(
                         CONF_UPDATE_INTERVAL, default=current_interval
                     ): vol.All(vol.Coerce(int), vol.Range(min=10)),
                     vol.Required(
                         CONF_USE_WEBSOCKET, default=current_ws
+                    ): bool,
+                    vol.Required(
+                        CONF_PRICE_CHANGES, default=current_changes
+                    ): bool,
+                    vol.Required(
+                        CONF_FUNDING_SENSORS, default=current_funding
+                    ): bool,
+                    vol.Required(
+                        CONF_POSITION_SENSORS, default=current_positions
                     ): bool,
                 }
             ),
