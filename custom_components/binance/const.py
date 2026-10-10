@@ -34,13 +34,17 @@ CHANGE_REFS = "change_refs"
 FUNDING_DATA = "funding_data"
 
 # --- Market coordinator (klines + funding) ---
-MARKET_UPDATE_INTERVAL = 60  # seconds; 1m reference prices
+MARKET_UPDATE_INTERVAL = 60  # seconds; 1m candles
 HOURLY_KLINES_REFRESH = 1800  # seconds; 1h candles for the 1w / 1M windows
+HOURLY_JOBS_PER_CYCLE = 100  # caps the 1h-kline burst (weight 5 each on fapi)
 FUNDING_INFO_REFRESH = 3600  # seconds; per-symbol funding intervals
+FETCH_RETRY_DELAY = 300  # seconds; retry of a failed 1h-kline / fundingInfo fetch
+FUNDING_MAX_AGE = 180  # seconds a funding rate stays valid without a refresh
 DEFAULT_FUNDING_INTERVAL_HOURS = 8
 KLINE_CONCURRENCY = 8
-# Window name -> candles back. Reference = close N candles before the
-# current (in-progress) one, so each window needs N + 1 candles.
+# Window name -> length in candles of the series it is measured on. The
+# minute series needs 241 candles (4 h + the forming one), the hour series
+# 721 (30 d + the forming one).
 MINUTE_WINDOWS = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "2h": 120, "4h": 240}
 HOUR_WINDOWS = {"1w": 168, "1M": 720}
 CHANGE_WINDOWS = ("1m", "5m", "15m", "1h", "2h", "4h", "1d", "1w", "1M")
@@ -50,6 +54,9 @@ WALLET_DATA = "wallet_data"
 WALLET_USD_DATA = "wallet_usd_data"
 PNL_DATA = "pnl_data"
 MARGIN_DATA = "margin_data"
+# True once positionRisk parsed at least once; until then an empty
+# PNL_DATA means "unknown", not "no open positions".
+POSITIONS_KNOWN = "positions_known"
 
 # --- hass.data layout keys ---
 SHARED_KEY = "_shared"

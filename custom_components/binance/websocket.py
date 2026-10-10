@@ -30,6 +30,7 @@ def _normalize_ws_ticker(ws_data: dict) -> dict[str, Any]:
         "lowPrice": ws_data.get("l", "0"),
         "volume": ws_data.get("v", "0"),
         "quoteVolume": ws_data.get("q", "0"),
+        "closeTime": ws_data.get("C"),
     }
 
 
@@ -96,13 +97,15 @@ class BinanceWebSocketManager:
     async def stop(self) -> None:
         """Stop all WebSocket connections."""
         self._running = False
-        for task in self._tasks:
+        # Detach the list first: a start() that runs while we await the
+        # cancellations must not have its new tasks cleared (and leaked).
+        tasks, self._tasks = self._tasks, []
+        for task in tasks:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-        self._tasks.clear()
         _LOGGER.info("Binance WebSocket connections stopped")
 
     async def _listen(self, url: str, data_key: str) -> None:

@@ -1,5 +1,6 @@
 """Binance sensor entities."""
 
+from bisect import bisect_left
 from datetime import UTC, datetime
 import logging
 
@@ -8,14 +9,14 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import _to_float
+from . import _is_perpetual, _to_float
 from .const import (
     BTCUSDT_PRICE,
     CHANGE_REFS,
@@ -30,8 +31,12 @@ from .const import (
     DOMAIN,
     FUNDING_DATA,
     FUTURES_DATA,
+    HOUR_WINDOWS,
     MARGIN_DATA,
+    MARKET_UPDATE_INTERVAL,
+    MINUTE_WINDOWS,
     PNL_DATA,
+    POSITIONS_KNOWN,
     QUOTE_ASSET_CONFIG,
     QUOTE_ASSET_KEYS_SORTED,
     SHARED_KEY,
@@ -75,12 +80,57 @@ def _liquidation_distance(pos: dict) -> float | None:
     return round(move / mark * 100, 2)
 
 
+# The newest completed 1m candle is up to one market refresh old by design,
+# so the minute windows allow one candle plus one refresh interval.
+MINUTE_TOLERANCE_MS = 60_000 + MARKET_UPDATE_INTERVAL * 1000
+TICKER_STALE_MS = 300_000
+
+
+def _close_near(series, target_ms: float, tolerance_ms: float) -> float | None:
+    """Close of the candle whose close time is nearest target_ms.
+
+    None when no candle is within tolerance: the series does not reach that
+    far back yet, or it is too old (fetch failures, rate-limit pause) to
+    cover the recent end, so a short window would silently become longer.
+    """
+    if not series:
+        return None
+    times, closes = series
+    i = bisect_left(times, target_ms)
+    best = None
+    for j in (i - 1, i):
+        if 0 <= j < len(times):
+            gap = abs(times[j] - target_ms)
+            if gap <= tolerance_ms and (best is None or gap < best[0]):
+                best = (gap, closes[j])
+    return best[1] if best else None
+
+
 POSITION_SENSOR_KINDS = ("pnl", "roi", "liq_distance")
 
 
 def _position_uid(kind: str, fmt_account: str, symbol: str, side: str) -> str:
     prefix = _position_prefix(symbol, side).lower()
     return f"binance_position_{kind}_{fmt_account}_{prefix}"
+
+
+def _market_wanted(entity, market: str, symbol: str, funding: bool = False) -> bool:
+    """Whether any config entry still tracks this shared market sensor.
+
+    An entry may serve a market sensor on behalf of another one; once no
+    entry tracks the pair the WebSocket drops it, so the sensor must go
+    unavailable instead of showing its last price as live.
+    """
+    hass = getattr(entity, "hass", None)
+    if hass is None:
+        return True
+    shared = hass.data.get(DOMAIN, {}).get(SHARED_KEY)
+    if not shared:
+        return False
+    return any(
+        symbol in reg.get(market, ()) and (not funding or reg.get("funding"))
+        for reg in shared["pair_registry"].values()
+    )
 
 
 def _all_desired_market_uids(hass: HomeAssistant) -> set[str]:
@@ -92,7 +142,7 @@ def _all_desired_market_uids(hass: HomeAssistant) -> set[str]:
     for pairs in shared["pair_registry"].values():
         for pair in pairs.get("futures", []):
             uids.add(f"binance_futures_{pair}")
-            if pairs.get("funding"):
+            if pairs.get("funding") and _is_perpetual(pair):
                 uids.add(f"binance_futures_funding_{pair}")
         for pair in pairs.get("spot", []):
             uids.add(f"binance_spot_{pair}")
@@ -151,7 +201,7 @@ async def async_setup_entry(
     # drop out here and their entities are cleaned up below.
     open_positions = [
         (pos["symbol"], pos.get("positionSide", "BOTH"))
-        for pos in coord_data.get(PNL_DATA, [])
+        for pos in coord_data.get(PNL_DATA) or []
     ] if positions_enabled else []
     for symbol, side in open_positions:
         for kind in POSITION_SENSOR_KINDS:
@@ -159,30 +209,43 @@ async def async_setup_entry(
                 _position_uid(kind, fmt_account, symbol, side)
             )
 
-    # Price / funding sensors this entry claims.
-    for pair in futures_pairs:
-        desired_own_uids.add(f"binance_futures_{pair}")
-        if funding_enabled:
-            desired_own_uids.add(f"binance_futures_funding_{pair}")
-    for pair in spot_pairs:
-        desired_own_uids.add(f"binance_spot_{pair}")
+    # Price / funding sensors this entry wants.
+    own_market_uids = [f"binance_futures_{pair}" for pair in futures_pairs]
+    if funding_enabled:
+        own_market_uids += [
+            f"binance_futures_funding_{pair}"
+            for pair in futures_pairs
+            if _is_perpetual(pair)
+        ]
+    own_market_uids += [f"binance_spot_{pair}" for pair in spot_pairs]
+    desired_own_uids.update(own_market_uids)
 
     # Union of ALL entries' market UIDs (so we don't delete a sensor
     # that another entry still needs).
     all_market_uids = _all_desired_market_uids(hass)
 
     # --- Remove stale entities for THIS config entry ---
+    held_market_uids: list[str] = []
     for entity in list(entity_registry.entities.values()):
         if entity.config_entry_id != config_entry.entry_id:
             continue
         if entity.unique_id in desired_own_uids:
             continue
-        # Don't remove if another entry still wants this market sensor.
+        # Another entry still wants this market sensor. It is registered
+        # here, so that entry will not create it: keep serving it.
         if entity.unique_id in all_market_uids:
+            held_market_uids.append(entity.unique_id)
             continue
         # If BOTH wallet fetches failed (transient outage during reload),
         # keep the registered wallet entities instead of wiping them.
         if not wallet_names and entity.unique_id.startswith("binance_wallet_"):
+            continue
+        # Same for positions while positionRisk has not answered yet.
+        if (
+            positions_enabled
+            and not coord_data.get(POSITIONS_KNOWN)
+            and entity.unique_id.startswith("binance_position_")
+        ):
             continue
         _LOGGER.debug(
             "Removing stale sensor: %s (%s)", entity.entity_id, entity.unique_id
@@ -203,23 +266,26 @@ async def async_setup_entry(
             entity_entry and entity_entry.config_entry_id == config_entry.entry_id
         )
 
-    for pair in futures_pairs:
-        if owned_here(f"binance_futures_{pair}"):
-            sensors.append(
-                BinancePriceSensor(
-                    price_coordinator, market_coordinator, pair, "futures"
-                )
+    def market_sensor(uid: str) -> SensorEntity | None:
+        if uid.startswith("binance_futures_funding_"):
+            return BinanceFundingRateSensor(
+                market_coordinator, uid.removeprefix("binance_futures_funding_")
             )
-        if funding_enabled and owned_here(f"binance_futures_funding_{pair}"):
-            sensors.append(BinanceFundingRateSensor(market_coordinator, pair))
+        if uid.startswith("binance_futures_"):
+            return BinancePriceSensor(
+                price_coordinator, market_coordinator,
+                uid.removeprefix("binance_futures_"), "futures",
+            )
+        if uid.startswith("binance_spot_"):
+            return BinancePriceSensor(
+                price_coordinator, market_coordinator,
+                uid.removeprefix("binance_spot_"), "spot",
+            )
+        return None
 
-    for pair in spot_pairs:
-        if owned_here(f"binance_spot_{pair}"):
-            sensors.append(
-                BinancePriceSensor(
-                    price_coordinator, market_coordinator, pair, "spot"
-                )
-            )
+    for uid in own_market_uids + held_market_uids:
+        if owned_here(uid) and (entity := market_sensor(uid)):
+            sensors.append(entity)
 
     # Wallet sensors — per-account.
     def wallet_sensors(names) -> list[SensorEntity]:
@@ -263,13 +329,20 @@ async def async_setup_entry(
 
     @callback
     def _add_new_entities() -> None:
+        # A refresh finishing mid-unload would add entities to a platform
+        # that was already reset (zombies bound to the old coordinator).
+        if (
+            entry_data.get("unloading")
+            or config_entry.state is not ConfigEntryState.LOADED
+        ):
+            return
         data = account_coordinator.data or {}
         new_wallets = (
             set(data.get(WALLET_DATA, {})) | set(data.get(WALLET_USD_DATA, {}))
         ) - known_wallets
         new_positions = {
             (pos["symbol"], pos.get("positionSide", "BOTH"))
-            for pos in data.get(PNL_DATA, [])
+            for pos in data.get(PNL_DATA) or []
         } - known_positions if positions_enabled else set()
         new_entities = []
         if new_wallets:
@@ -332,7 +405,11 @@ class BinancePriceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self._symbol_data is not None
+        return (
+            super().available
+            and self._symbol_data is not None
+            and _market_wanted(self, self._market_type, self._symbol)
+        )
 
     @property
     def native_value(self):
@@ -350,23 +427,55 @@ class BinancePriceSensor(CoordinatorEntity, SensorEntity):
 
     def _changes(self, sym: dict) -> dict:
         """change_* attributes; empty when % changes are not enabled."""
-        refs = (
+        series = (
             (self._market.data or {})
             .get(CHANGE_REFS, {})
             .get(self._market_type, {})
             .get(self._symbol)
         )
-        if refs is None:
+        if series is None:
             return {}
-        price = _to_float(sym.get("lastPrice"), None)
+
+        # "Now" is the live ticker, unless the last kline fetch is newer
+        # (REST mode between polls, or the WebSocket reconnecting): pairing
+        # an old price with newer candles would invert short windows.
+        ticker_price = _to_float(sym.get("lastPrice"), None)
+        ticker_ms = _to_float(sym.get("closeTime"))
+        last = series["last"]
+        now_ms, price = ticker_ms, ticker_price
+        if last and (not ticker_price or ticker_ms < last[0]):
+            now_ms, price = last
+
+        def change(ref):
+            return round((price / ref - 1) * 100, 2) if price and ref else None
+
         changes = {}
         for window in CHANGE_WINDOWS:
-            ref = refs.get(window)
-            changes[f"change_{window}"] = (
-                round((price / ref - 1) * 100, 2) if price and ref else None
-            )
-        # Rolling 24 h straight from the ticker.
-        changes["change_1d"] = _to_float(sym.get("priceChangePercent"), None)
+            if window in MINUTE_WINDOWS:
+                ref = _close_near(
+                    series["m"],
+                    now_ms - MINUTE_WINDOWS[window] * 60_000,
+                    MINUTE_TOLERANCE_MS,
+                )
+            elif window in HOUR_WINDOWS:
+                ref = _close_near(
+                    series["h"], now_ms - HOUR_WINDOWS[window] * 3_600_000, 3_600_000
+                )
+            else:
+                ref = None
+            changes[f"change_{window}"] = change(ref)
+
+        # Rolling 24 h: the ticker's own figure unless it is minutes stale.
+        # A plain "older than the candles" test would flip the source every
+        # minute (futures REST closeTime lags by seconds).
+        ticker_fresh = bool(ticker_price) and (
+            not last or ticker_ms >= last[0] - TICKER_STALE_MS
+        )
+        changes["change_1d"] = (
+            _to_float(sym.get("priceChangePercent"), None)
+            if ticker_fresh
+            else change(_close_near(series["h"], now_ms - 86_400_000, 3_600_000))
+        )
         return changes
 
     @property
@@ -422,7 +531,11 @@ class BinanceFundingRateSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self._funding is not None
+        return (
+            super().available
+            and self._funding is not None
+            and _market_wanted(self, "futures", self._symbol, funding=True)
+        )
 
     @property
     def native_value(self):
@@ -587,14 +700,16 @@ class BinancePnlSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def _positions(self) -> list[dict]:
-        data = self.coordinator.data
-        if data:
-            return data.get(PNL_DATA, [])
-        return []
+        return (self.coordinator.data or {}).get(PNL_DATA) or []
 
     @property
     def available(self) -> bool:
-        return super().available and self.coordinator.data is not None
+        # PNL_DATA is None while positions are unknown (rate limit); that
+        # must not read as "no open positions, 0 PnL".
+        return (
+            super().available
+            and (self.coordinator.data or {}).get(PNL_DATA) is not None
+        )
 
     @property
     def native_value(self):
@@ -765,7 +880,7 @@ class BinancePositionSensorBase(CoordinatorEntity, SensorEntity):
 
     @property
     def _position(self) -> dict | None:
-        for pos in (self.coordinator.data or {}).get(PNL_DATA, []):
+        for pos in (self.coordinator.data or {}).get(PNL_DATA) or []:
             if (
                 pos["symbol"] == self._symbol
                 and pos.get("positionSide", "BOTH") == self._side

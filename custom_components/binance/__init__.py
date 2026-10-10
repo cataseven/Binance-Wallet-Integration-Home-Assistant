@@ -69,11 +69,14 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_USE_WEBSOCKET,
     DOMAIN,
+    FETCH_RETRY_DELAY,
     FUNDING_DATA,
     FUNDING_INFO_REFRESH,
+    FUNDING_MAX_AGE,
     FUTURES_API_URL,
     FUTURES_DATA,
     HOUR_WINDOWS,
+    HOURLY_JOBS_PER_CYCLE,
     HOURLY_KLINES_REFRESH,
     KLINE_CONCURRENCY,
     MARGIN_DATA,
@@ -81,8 +84,8 @@ from .const import (
     MINUTE_WINDOWS,
     PNL_DATA,
     PLATFORMS,
+    POSITIONS_KNOWN,
     RATE_LIMIT_BACKOFF_BASE,
-    RATE_LIMIT_BACKOFF_MAX,
     SHARED_KEY,
     SPOT_API_URL,
     SPOT_DATA,
@@ -121,13 +124,22 @@ def _merged_pairs(shared: dict) -> tuple[list[str], list[str]]:
 
 
 class BinanceRateLimited(UpdateFailed):
-    """HTTP 429 / 418 from Binance, with the server-requested wait."""
+    """HTTP 429 / 418 from Binance, or a request held back while one lasts."""
 
-    def __init__(self, status: int, retry_after: int) -> None:
+    def __init__(self, retry_after: int, status: int | None = None) -> None:
         super().__init__(
             f"Binance rate limit (HTTP {status}), back off {retry_after}s"
+            if status
+            else f"Binance rate limit active, {retry_after}s left"
         )
         self.retry_after = retry_after
+
+
+# Host -> monotonic time until which Binance asked us to stop (Retry-After).
+# Module level so a ban outlives a reload of the shared layer, and checked
+# in _request so every coordinator stops sending: requests made after a
+# 429 are what escalate it into a 418 IP ban.
+_RATE_LIMITED_UNTIL: dict[str, float] = {}
 
 
 async def _request(
@@ -140,6 +152,11 @@ async def _request(
     params: dict | None = None,
 ) -> list | dict:
     """GET request with optional HMAC signing and rate-limit detection."""
+    host = url.split("/", 3)[2]
+    wait = _RATE_LIMITED_UNTIL.get(host, 0) - time.monotonic()
+    if wait > 0:
+        raise BinanceRateLimited(math.ceil(wait))
+
     headers: dict[str, str] = {}
     if signed and api_key and api_secret:
         headers["X-MBX-APIKEY"] = api_key
@@ -154,10 +171,19 @@ async def _request(
     async with session.get(url, headers=headers, params=params) as resp:
         if resp.status in (HTTPStatus.TOO_MANY_REQUESTS, 418):
             retry = _to_float(resp.headers.get("Retry-After"), None)
-            raise BinanceRateLimited(
-                resp.status,
-                int(retry) if retry and retry > 0 else RATE_LIMIT_BACKOFF_BASE,
-            )
+            retry = math.ceil(retry) if retry and retry > 0 else RATE_LIMIT_BACKOFF_BASE
+            until = time.monotonic() + retry
+            # Parallel requests all get the 429; log the ban once.
+            if until > _RATE_LIMITED_UNTIL.get(host, 0) + 1:
+                _LOGGER.warning(
+                    "Binance rate limit on %s (HTTP %s): pausing all requests "
+                    "to it for %d s",
+                    host,
+                    resp.status,
+                    retry,
+                )
+            _RATE_LIMITED_UNTIL[host] = max(until, _RATE_LIMITED_UNTIL.get(host, 0))
+            raise BinanceRateLimited(retry, resp.status)
         resp.raise_for_status()
         return await resp.json()
 
@@ -383,7 +409,6 @@ class BinancePriceCoordinator(DataUpdateCoordinator):
     ) -> None:
         self.session = session
         self.use_websocket = use_websocket
-        self._backoff_until: float = 0
         self._failed_sections: set[str] = set()
 
         super().__init__(
@@ -398,10 +423,6 @@ class BinancePriceCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> dict:
-        remaining = self._backoff_until - time.monotonic()
-        if remaining > 0:
-            raise UpdateFailed(f"Rate-limit backoff, {remaining:.0f}s left")
-
         try:
             async with asyncio.timeout(30):
                 tasks: dict[str, any] = {}
@@ -431,7 +452,10 @@ class BinancePriceCoordinator(DataUpdateCoordinator):
                 fetched = dict(zip(keys, results))
 
                 for k, v in fetched.items():
-                    if isinstance(v, Exception):
+                    # A rate limit is logged once, when it starts, in _request.
+                    if isinstance(v, Exception) and not isinstance(
+                        v, BinanceRateLimited
+                    ):
                         _LOGGER.warning("Price fetch %s failed: %s", k, v)
 
                 failed = self._failed_sections
@@ -482,18 +506,24 @@ class BinancePriceCoordinator(DataUpdateCoordinator):
 # ======================================================================
 
 
-def _refs_from_klines(klines: list, windows: dict[str, int]) -> dict[str, float]:
-    """Reference price per window: the close N candles before the current one.
+def _candle_series(klines: list) -> dict:
+    """Kline rows → completed candles plus the forming candle's latest price.
 
-    The current candle is still forming, so with the 60 s refresh the
-    measured window averages N candles. Windows the history cannot cover
-    yet (fresh listings) are left out.
+    Completed candles become parallel lists of close time (ms) and close,
+    so the sensor can pick, at compute time, the candle closest to
+    "now - window" instead of trusting a reference fixed at fetch time.
+    Binance lists the forming candle last; its open time stands in for
+    when its latest price was current.
     """
-    closes = [float(k[4]) for k in klines]
+    rows = [(int(k[6]), float(k[4]), int(k[0])) for k in klines]
+    if not rows:
+        raise ValueError("empty kline list")
+    *done, (_, last_price, last_open) = rows
+    done = [(t, c) for t, c, _ in done if c > 0]
     return {
-        name: closes[-(n + 1)]
-        for name, n in windows.items()
-        if len(closes) > n and closes[-(n + 1)] > 0
+        "t": [t for t, _ in done],
+        "c": [c for _, c in done],
+        "last": (last_open, last_price),
     }
 
 
@@ -528,24 +558,32 @@ def _parse_funding(
         if symbol not in wanted:
             continue
         rate = _to_float(row.get("lastFundingRate"), None)
-        if rate is None:
+        next_funding = int(_to_float(row.get("nextFundingTime")))
+        # Delivery and settling contracts report rate 0 with no next
+        # funding time: they have no funding, not a 0 % one.
+        if rate is None or not next_funding:
             continue
         funding[symbol] = {
             "rate": rate,
             "interval_hours": intervals.get(symbol, DEFAULT_FUNDING_INTERVAL_HOURS),
-            "next_funding_time": int(_to_float(row.get("nextFundingTime"))) or None,
+            "next_funding_time": next_funding,
             "mark_price": _to_float(row.get("markPrice"), None),
             "index_price": _to_float(row.get("indexPrice"), None),
         }
     return funding
 
 
-class BinanceMarketCoordinator(DataUpdateCoordinator):
-    """Kline reference prices for % changes and futures funding data.
+def _is_perpetual(symbol: str) -> bool:
+    """Delivery contracts carry their expiry after an underscore."""
+    return "_" not in symbol
 
-    Shared by all accounts like the price coordinator. Requests only what
-    the registered entries enabled, and honours Binance's Retry-After on
-    429 / 418 instead of polling through it into an IP ban.
+
+class BinanceMarketCoordinator(DataUpdateCoordinator):
+    """Candle series for % changes and futures funding data.
+
+    Shared by all accounts like the price coordinator, and requests only
+    what the registered entries enabled. Rate limits are enforced per host
+    in _request, so a 429 / 418 stops every queued request at once.
     """
 
     def __init__(
@@ -554,12 +592,13 @@ class BinanceMarketCoordinator(DataUpdateCoordinator):
         self.session = session
         self._shared = shared
         self._failed_sections: set[str] = set()
-        self._backoff_until: float = 0
-        self._minute_refs: dict[tuple[str, str], dict[str, float]] = {}
-        self._hour_refs: dict[tuple[str, str], dict[str, float]] = {}
-        self._hour_fetched_at: dict[tuple[str, str], float] = {}
+        self._minute: dict[tuple[str, str], dict] = {}
+        self._hour: dict[tuple[str, str], dict] = {}
+        # Monotonic due times; a missing key means "fetch now".
+        self._hour_due: dict[tuple[str, str], float] = {}
+        self._funding_info_due: float = -math.inf
         self._funding_intervals: dict[str, int] = {}
-        self._funding_info_at: float = 0
+        self._funding: dict[str, tuple[float, dict]] = {}
 
         super().__init__(
             hass,
@@ -578,7 +617,7 @@ class BinanceMarketCoordinator(DataUpdateCoordinator):
                 changes.update(("futures", s) for s in reg.get("futures", []))
                 changes.update(("spot", s) for s in reg.get("spot", []))
             if reg.get("funding"):
-                funding.update(reg.get("futures", []))
+                funding.update(filter(_is_perpetual, reg.get("futures", [])))
         return changes, funding
 
     async def _klines(self, market: str, symbol: str, interval: str, limit: int):
@@ -594,23 +633,25 @@ class BinanceMarketCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> dict:
-        existing = self.data or {CHANGE_REFS: {}, FUNDING_DATA: {}}
         now = time.monotonic()
-        if now < self._backoff_until:
-            return existing
-
         changes, funding = self._wanted()
-        jobs: list[tuple[str, str, str, int]] = []
-        for market, symbol in changes:
-            jobs.append((market, symbol, "1m", max(MINUTE_WINDOWS.values()) + 1))
-            if (
-                now - self._hour_fetched_at.get((market, symbol), 0)
-                >= HOURLY_KLINES_REFRESH
-            ):
-                jobs.append((market, symbol, "1h", max(HOUR_WINDOWS.values()) + 1))
-        fetch_info = bool(funding) and (
-            now - self._funding_info_at >= FUNDING_INFO_REFRESH
+
+        jobs: list[tuple[str, str, str, int]] = [
+            (market, symbol, "1m", max(MINUTE_WINDOWS.values()) + 1)
+            for market, symbol in changes
+        ]
+        # 1h candles are weight 5 on fapi: refresh the most overdue first,
+        # capped per cycle so many pairs never burst past the minute limit.
+        due = sorted(
+            (self._hour_due.get(key, -math.inf), key)
+            for key in changes
+            if self._hour_due.get(key, -math.inf) <= now
         )
+        jobs += [
+            (market, symbol, "1h", max(HOUR_WINDOWS.values()) + 1)
+            for _, (market, symbol) in due[:HOURLY_JOBS_PER_CYCLE]
+        ]
+        fetch_info = bool(funding) and self._funding_info_due <= now
 
         semaphore = asyncio.Semaphore(KLINE_CONCURRENCY)
 
@@ -634,78 +675,79 @@ class BinanceMarketCoordinator(DataUpdateCoordinator):
         except TimeoutError as err:
             raise UpdateFailed("Market data request timed out") from err
 
-        rate_limited = [r for r in results if isinstance(r, BinanceRateLimited)]
-        if rate_limited:
-            wait = max(r.retry_after for r in rate_limited)
-            self._backoff_until = now + wait
-            _LOGGER.warning(
-                "Binance rate limit hit fetching market data, pausing %d s", wait
-            )
-
         failed = self._failed_sections
-        kline_results = results[: len(jobs)]
-        for (market, symbol, interval, _), raw in zip(jobs, kline_results):
-            if not _note_fetch(
-                failed, self.name, f"{market} {symbol} {interval} klines", raw
-            ):
-                continue
+        for (market, symbol, interval, _), raw in zip(jobs, results):
             key = (market, symbol)
-            if interval == "1m":
-                self._minute_refs[key] = _parse_section(
-                    failed, self.name, f"{symbol} 1m klines",
-                    partial(_refs_from_klines, windows=MINUTE_WINDOWS),
-                    raw, self._minute_refs.get(key, {}),
+            tag = f"{market} {symbol} {interval} klines"
+            ok = _note_fetch(failed, self.name, tag, raw)
+            if interval == "1h":
+                # A banned host's jobs wait out the ban instead of filling
+                # every cycle's slots ahead of the other host's pairs.
+                self._hour_due[key] = now + (
+                    raw.retry_after
+                    if isinstance(raw, BinanceRateLimited)
+                    else HOURLY_KLINES_REFRESH if ok else FETCH_RETRY_DELAY
                 )
-            else:
-                self._hour_refs[key] = _parse_section(
-                    failed, self.name, f"{symbol} 1h klines",
-                    partial(_refs_from_klines, windows=HOUR_WINDOWS),
-                    raw, self._hour_refs.get(key, {}),
-                )
-                self._hour_fetched_at[key] = now
+            if not ok:
+                continue
+            cache = self._minute if interval == "1m" else self._hour
+            series = _parse_section(failed, self.name, tag, _candle_series, raw, None)
+            if series is not None:
+                cache[key] = series
 
         # Forget pairs no entry tracks any more.
-        for cache in (self._minute_refs, self._hour_refs, self._hour_fetched_at):
+        for cache in (self._minute, self._hour, self._hour_due):
             for key in list(cache):
                 if key not in changes:
                     del cache[key]
 
-        refs: dict[str, dict[str, dict[str, float]]] = {"futures": {}, "spot": {}}
+        series_data: dict[str, dict[str, dict]] = {"futures": {}, "spot": {}}
         for market, symbol in changes:
-            merged = {
-                **self._minute_refs.get((market, symbol), {}),
-                **self._hour_refs.get((market, symbol), {}),
-            }
-            if merged:
-                refs[market][symbol] = merged
+            minute = self._minute.get((market, symbol))
+            hour = self._hour.get((market, symbol))
+            if minute or hour:
+                series_data[market][symbol] = {
+                    "m": (minute["t"], minute["c"]) if minute else None,
+                    "h": (hour["t"], hour["c"]) if hour else None,
+                    "last": minute["last"] if minute else None,
+                }
 
         extra = iter(results[len(jobs):])
         if fetch_info:
             info_raw = next(extra)
-            if _note_fetch(failed, self.name, "funding info", info_raw):
+            ok = _note_fetch(failed, self.name, "funding info", info_raw)
+            self._funding_info_due = now + (
+                info_raw.retry_after
+                if isinstance(info_raw, BinanceRateLimited)
+                else FUNDING_INFO_REFRESH if ok else FETCH_RETRY_DELAY
+            )
+            if ok:
                 self._funding_intervals = _parse_section(
                     failed, self.name, "funding info",
                     _parse_funding_info, info_raw, self._funding_intervals,
                 )
-                self._funding_info_at = now
 
-        previous_funding = {
-            s: v for s, v in existing.get(FUNDING_DATA, {}).items() if s in funding
-        }
-        funding_data = previous_funding
         if funding:
             premium_raw = next(extra)
             if _note_fetch(failed, self.name, "funding rate", premium_raw):
-                funding_data = _parse_section(
+                parsed = _parse_section(
                     failed, self.name, "funding rate",
                     partial(
                         _parse_funding, wanted=funding,
                         intervals=self._funding_intervals,
                     ),
-                    premium_raw, previous_funding,
+                    premium_raw, None,
                 )
+                for symbol, row in (parsed or {}).items():
+                    self._funding[symbol] = (now, row)
+        # A rate keeps its last good value for a few minutes of failed
+        # fetches, then the sensor goes unavailable instead of going stale.
+        for symbol in list(self._funding):
+            if symbol not in funding or now - self._funding[symbol][0] > FUNDING_MAX_AGE:
+                del self._funding[symbol]
+        funding_data = {symbol: row for symbol, (_, row) in self._funding.items()}
 
-        return {CHANGE_REFS: refs, FUNDING_DATA: funding_data}
+        return {CHANGE_REFS: series_data, FUNDING_DATA: funding_data}
 
 
 # ======================================================================
@@ -729,7 +771,6 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
         self.session = session
         self.api_key = api_key
         self.api_secret = api_secret
-        self._backoff_until: float = 0
         self._failed_sections: set[str] = set()
 
         super().__init__(
@@ -742,10 +783,6 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> dict:
-        remaining = self._backoff_until - time.monotonic()
-        if remaining > 0:
-            raise UpdateFailed(f"Rate-limit backoff, {remaining:.0f}s left")
-
         try:
             async with asyncio.timeout(30):
                 wallet_task = _request(
@@ -793,9 +830,15 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
 
                 failed = self._failed_sections
 
+                # A section whose host is rate-limited goes unavailable rather
+                # than showing values frozen for the whole ban; the other
+                # host's sections stay live. _request logs the ban once.
+
                 # Wallet (BTC valuation)
                 wallet_data = existing.get(WALLET_DATA, {})
-                if isinstance(wallet_raw, Exception):
+                if isinstance(wallet_raw, BinanceRateLimited):
+                    wallet_data = {}
+                elif isinstance(wallet_raw, Exception):
                     _LOGGER.warning(
                         "Wallet fetch failed for %s: %s", self.name, wallet_raw
                     )
@@ -811,7 +854,9 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
 
                 # Wallet (USDT valuation)
                 wallet_usd_data = existing.get(WALLET_USD_DATA, {})
-                if isinstance(wallet_usd_raw, Exception):
+                if isinstance(wallet_usd_raw, BinanceRateLimited):
+                    wallet_usd_data = {}
+                elif isinstance(wallet_usd_raw, Exception):
                     _LOGGER.warning(
                         "Wallet USD fetch failed for %s: %s",
                         self.name, wallet_usd_raw,
@@ -827,9 +872,12 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                         wallet_usd_raw, wallet_usd_data,
                     )
 
-                # PnL — keep only open positions
+                # PnL — keep only open positions. None means "unknown" (it
+                # must not read as "no positions, 0 PnL").
                 pnl_data = existing.get(PNL_DATA, [])
-                if isinstance(pnl_raw, Exception):
+                if isinstance(pnl_raw, BinanceRateLimited):
+                    pnl_data = None
+                elif isinstance(pnl_raw, Exception):
                     _LOGGER.warning(
                         "PnL fetch failed for %s: %s", self.name, pnl_raw
                     )
@@ -838,10 +886,16 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                         failed, self.name, "futures position",
                         _parse_positions, pnl_raw, pnl_data,
                     )
+                positions_known = existing.get(POSITIONS_KNOWN, False) or (
+                    not isinstance(pnl_raw, Exception)
+                    and "futures position" not in failed
+                )
 
                 # Margin — account-level + per-position margin ratios
                 margin_data = existing.get(MARGIN_DATA, {})
-                if isinstance(account_raw, Exception):
+                if isinstance(account_raw, BinanceRateLimited):
+                    margin_data = {}
+                elif isinstance(account_raw, Exception):
                     _LOGGER.warning(
                         "Futures account fetch failed for %s: %s",
                         self.name, account_raw,
@@ -856,6 +910,7 @@ class BinanceAccountCoordinator(DataUpdateCoordinator):
                     WALLET_DATA: wallet_data,
                     WALLET_USD_DATA: wallet_usd_data,
                     PNL_DATA: pnl_data,
+                    POSITIONS_KNOWN: positions_known,
                     MARGIN_DATA: margin_data,
                 }
 
@@ -887,9 +942,8 @@ async def _ensure_shared(
     interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
 
     shared = domain_data.get(SHARED_KEY)
-    created = shared is None
 
-    if created:
+    if shared is None:
         # First entry — bootstrap shared layer.
         shared = {
             "price_coordinator": BinancePriceCoordinator(
@@ -917,9 +971,6 @@ async def _ensure_shared(
 
     coordinator = shared["price_coordinator"]
     market = shared["market_coordinator"]
-    if created:
-        await coordinator.async_register_shutdown()
-        await market.async_register_shutdown()
 
     # Also covers a bootstrap that failed while another entry kept the
     # shared layer alive.
@@ -940,30 +991,41 @@ async def _ensure_shared(
     return shared
 
 
+def _ws_lock(hass: HomeAssistant) -> asyncio.Lock:
+    """Serializes WebSocket restarts and the shared-layer teardown.
+
+    Kept outside the shared dict so it outlives a teardown. Without it, a
+    restart paused in ws.stop() could resume after the layer was torn down
+    and start a manager nothing will ever stop again.
+    """
+    return hass.data[DOMAIN].setdefault("_ws_lock", asyncio.Lock())
+
+
 async def _refresh_websocket(hass: HomeAssistant) -> None:
     """(Re)start WebSocket with the union of all registered pairs."""
-    shared = hass.data[DOMAIN].get(SHARED_KEY)
-    if not shared:
-        return
+    async with _ws_lock(hass):
+        shared = hass.data[DOMAIN].get(SHARED_KEY)
+        if not shared:
+            return
 
-    ws: BinanceWebSocketManager | None = shared.get("ws_manager")
-    use_ws = shared.get("use_websocket", False)
-    all_futures, all_spot = _merged_pairs(shared)
+        ws: BinanceWebSocketManager | None = shared.get("ws_manager")
+        use_ws = shared.get("use_websocket", False)
+        all_futures, all_spot = _merged_pairs(shared)
 
-    if use_ws and (all_futures or all_spot):
-        session = async_get_clientsession(hass)
-        coordinator = shared["price_coordinator"]
+        if use_ws and (all_futures or all_spot):
+            session = async_get_clientsession(hass)
+            coordinator = shared["price_coordinator"]
 
-        if ws is None:
-            ws = BinanceWebSocketManager(hass, coordinator, session)
-            shared["ws_manager"] = ws
-        else:
+            if ws is None:
+                ws = BinanceWebSocketManager(hass, coordinator, session)
+                shared["ws_manager"] = ws
+            else:
+                await ws.stop()
+
+            await ws.start(all_spot, all_futures)
+        elif ws:
             await ws.stop()
-
-        await ws.start(all_spot, all_futures)
-    elif ws:
-        await ws.stop()
-        shared["ws_manager"] = None
+            shared["ws_manager"] = None
 
 
 async def _unregister_shared(hass: HomeAssistant, entry_id: str) -> None:
@@ -977,9 +1039,10 @@ async def _unregister_shared(hass: HomeAssistant, entry_id: str) -> None:
     if not shared["pair_registry"]:
         # Last entry — tear down.
         hass.data[DOMAIN].pop(SHARED_KEY, None)
-        ws: BinanceWebSocketManager | None = shared.get("ws_manager")
-        if ws:
-            await ws.stop()
+        async with _ws_lock(hass):
+            ws: BinanceWebSocketManager | None = shared.get("ws_manager")
+            if ws:
+                await ws.stop()
         await shared["price_coordinator"].async_shutdown()
         await shared["market_coordinator"].async_shutdown()
     else:
@@ -1037,8 +1100,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+    # Stops the sensor platform's dynamic-entity listener before the platform
+    # is reset; before HA 2025.3 the entry stays LOADED throughout unload.
+    entry_data["unloading"] = True
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         await _unregister_shared(hass, entry.entry_id)
+    else:
+        entry_data["unloading"] = False
     return unload_ok
